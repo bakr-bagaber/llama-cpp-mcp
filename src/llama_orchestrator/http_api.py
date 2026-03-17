@@ -294,6 +294,23 @@ def _apply_reasoning_hint(model_family: str | None, reasoning_mode: ReasoningMod
     if not family.startswith("qwen"):
         return
 
+    # Qwen3.5 documents a hard `enable_thinking` switch rather than the
+    # Qwen3 soft `/think` and `/no_think` controls. We attach the explicit
+    # request fields first and only use prompt-level hints for older Qwen
+    # families that support them.
+    if family.startswith("qwen3.5") or family == "qwen3.5":
+        if reasoning_mode is ReasoningMode.OFF:
+            payload.setdefault("chat_template_kwargs", {})
+            if isinstance(payload["chat_template_kwargs"], dict):
+                payload["chat_template_kwargs"].setdefault("enable_thinking", False)
+            payload.setdefault("enable_thinking", False)
+        elif reasoning_mode in {ReasoningMode.LIGHT, ReasoningMode.DEEP, ReasoningMode.MODEL_NATIVE}:
+            payload.setdefault("chat_template_kwargs", {})
+            if isinstance(payload["chat_template_kwargs"], dict):
+                payload["chat_template_kwargs"].setdefault("enable_thinking", True)
+            payload.setdefault("enable_thinking", True)
+        return
+
     if reasoning_mode is ReasoningMode.OFF:
         directive = "/no_think"
     elif reasoning_mode in {ReasoningMode.LIGHT, ReasoningMode.DEEP, ReasoningMode.MODEL_NATIVE}:

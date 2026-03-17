@@ -153,3 +153,41 @@ def test_preset_defaults_add_qwen_no_think_directive(sandbox_path: Path) -> None
     assert payload["temperature"] == 0.1
     assert payload["messages"][0]["role"] == "system"
     assert "/no_think" in payload["messages"][0]["content"]
+
+
+def test_preset_defaults_use_enable_thinking_for_qwen35(sandbox_path: Path) -> None:
+    settings = AppSettings(
+        catalog_path=sandbox_path / "catalog.yaml",
+        state_path=sandbox_path / "orchestrator.db",
+    )
+    settings.ensure_directories()
+    catalog = CatalogStore(settings.catalog_path)
+    catalog.load()
+    catalog.upsert_model(
+        BaseModelDefinition(
+            id="qwen35",
+            display_name="Qwen3.5",
+            local_path=sandbox_path / "demo.gguf",
+            family="qwen3.5",
+        )
+    )
+    catalog.upsert_profile(LoadProfile(id="balanced"))
+    catalog.upsert_preset(GenerationPreset(id="precise", reasoning_mode=ReasoningMode.OFF))
+    catalog.upsert_alias(
+        AliasDefinition(
+            id="qwen35/alias",
+            base_model_id="qwen35",
+            load_profile_id="balanced",
+            preset_id="precise",
+        )
+    )
+
+    payload = _apply_preset_defaults(
+        catalog,
+        "qwen35/alias",
+        {"model": "qwen35/alias", "messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert payload["enable_thinking"] is False
+    assert payload["chat_template_kwargs"]["enable_thinking"] is False
+    assert payload["messages"][0]["role"] == "user"
