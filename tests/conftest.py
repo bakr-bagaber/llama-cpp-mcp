@@ -28,3 +28,13 @@ def sandbox_path() -> Path:
     path = TEST_WORK / uuid.uuid4().hex
     path.mkdir()
     return path
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Run async tests on asyncio only.
+
+    The project does not currently depend on trio, so locking the backend
+    keeps the runtime tests deterministic.
+    """
+    return "asyncio"

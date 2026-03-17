@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .benchmarks import BenchmarkService
 from .catalog import CatalogStore
 from .downloads import download_model
 from .hardware import HardwareProbe
@@ -32,6 +33,7 @@ def create_mcp_server(
         raise RuntimeError("The 'mcp' package is not installed. Install dependencies before starting the MCP server.")
 
     mcp = FastMCP("llama_orchestrator")
+    benchmark_service = BenchmarkService(state)
 
     @mcp.tool(name="llama_list_models", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
     async def list_models() -> dict[str, Any]:
@@ -75,6 +77,18 @@ def create_mcp_server(
         preset = GenerationPreset.model_validate(params)
         catalog.upsert_preset(preset)
         return {"ok": True, "preset": preset.model_dump(mode="json")}
+
+    @mcp.tool(name="llama_delete_profile", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def delete_profile(params: dict[str, Any]) -> dict[str, Any]:
+        profile_id = str(params["profile_id"])
+        catalog.delete_profile(profile_id)
+        return {"ok": True, "profile_id": profile_id}
+
+    @mcp.tool(name="llama_delete_preset", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def delete_preset(params: dict[str, Any]) -> dict[str, Any]:
+        preset_id = str(params["preset_id"])
+        catalog.delete_preset(preset_id)
+        return {"ok": True, "preset_id": preset_id}
 
     @mcp.tool(name="llama_create_alias", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def create_alias(params: dict[str, Any]) -> dict[str, Any]:
@@ -128,6 +142,21 @@ def create_mcp_server(
         records = state.list_benchmarks(alias_id)
         return {"benchmarks": [record.model_dump(mode="json") for record in records]}
 
+    @mcp.tool(name="llama_record_benchmark", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
+    async def record_benchmark(params: dict[str, Any]) -> dict[str, Any]:
+        record = benchmark_service.record_manual_benchmark(
+            alias_id=str(params["alias_id"]),
+            backend=params["backend"],
+            placement=params["placement"],
+            prompt_tps=float(params["prompt_tps"]),
+            generation_tps=float(params["generation_tps"]),
+            load_seconds=float(params.get("load_seconds", 0.0)),
+            peak_ram_bytes=int(params["peak_ram_bytes"]) if params.get("peak_ram_bytes") is not None else None,
+            peak_vram_bytes=int(params["peak_vram_bytes"]) if params.get("peak_vram_bytes") is not None else None,
+            metadata=dict(params.get("metadata", {})),
+        )
+        return {"ok": True, "benchmark": record.model_dump(mode="json")}
+
     @mcp.tool(name="llama_get_memory_policy", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
     async def get_memory_policy() -> dict[str, Any]:
         return settings.policy.model_dump(mode="json")
@@ -155,5 +184,29 @@ def create_mcp_server(
             ),
         )
         return decision.model_dump(mode="json")
+
+    @mcp.tool(name="llama_route_simulate", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def route_simulate(params: dict[str, Any]) -> dict[str, Any]:
+        alias_id = str(params["alias_id"])
+        alias, model, profile, _ = catalog.resolve_alias(alias_id)
+        inventory = hardware_probe.collect()
+        model_ram_bytes = int(params.get("model_ram_bytes", model.estimated_ram_bytes or model.size_bytes or 4 * 1024**3))
+        model_vram_bytes = int(params.get("model_vram_bytes", model.estimated_vram_bytes or 2 * 1024**3))
+        decision = runtime_manager.router.choose_placement(
+            alias=alias,
+            profile=profile,
+            model_ram_bytes=model_ram_bytes,
+            model_vram_bytes=model_vram_bytes,
+            context=RouteContext(
+                inventory=inventory,
+                warm_runtimes=runtime_manager.list_runtimes(),
+                benchmarks=state.list_benchmarks(alias_id),
+                requested_backend_preference=alias.backend_preference or profile.backend_preference,
+            ),
+        )
+        return {
+            "decision": decision.model_dump(mode="json"),
+            "inventory": inventory.model_dump(mode="json"),
+        }
 
     return mcp

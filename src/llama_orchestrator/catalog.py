@@ -95,6 +95,14 @@ class CatalogStore:
         self.document.aliases = [item for item in self.document.aliases if item.id != alias_id]
         self.save()
 
+    def delete_profile(self, profile_id: str) -> None:
+        self.document.profiles = [item for item in self.document.profiles if item.id != profile_id]
+        self.save()
+
+    def delete_preset(self, preset_id: str) -> None:
+        self.document.presets = [item for item in self.document.presets if item.id != preset_id]
+        self.save()
+
     @staticmethod
     def _upsert_item(items: list, new_item: object) -> None:
         for index, item in enumerate(items):

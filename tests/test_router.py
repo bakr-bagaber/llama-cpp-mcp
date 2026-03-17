@@ -4,6 +4,7 @@ from llama_orchestrator.models import (
     AliasDefinition,
     Backend,
     BackendPreference,
+    BenchmarkRecord,
     HardwareDevice,
     HardwareInventory,
     LoadProfile,
@@ -136,3 +137,35 @@ def test_router_exposes_igpu_candidates_when_flag_enabled() -> None:
     )
 
     assert any(candidate.placement == PlacementKind.IGPU_ONLY for candidate in decision.candidates)
+
+
+def test_router_uses_benchmark_bonus_when_available() -> None:
+    settings = AppSettings.load()
+    router = Router(settings)
+    alias = make_alias()
+    profile = make_profile()
+    inventory = make_inventory(include_dgpu=True)
+
+    decision = router.choose_placement(
+        alias=alias,
+        profile=profile,
+        model_ram_bytes=2 * 1024**3,
+        model_vram_bytes=2 * 1024**3,
+        context=RouteContext(
+            inventory=inventory,
+            warm_runtimes=[],
+            benchmarks=[
+                BenchmarkRecord(
+                    alias_id="alias",
+                    backend=Backend.CUDA,
+                    placement=PlacementKind.DGPU_ONLY,
+                    prompt_tps=500.0,
+                    generation_tps=500.0,
+                )
+            ],
+            requested_backend_preference=BackendPreference.AUTO,
+        ),
+    )
+
+    assert decision.selected is not None
+    assert decision.selected.placement == PlacementKind.DGPU_ONLY
