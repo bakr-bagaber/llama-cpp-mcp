@@ -1,0 +1,39 @@
+[project]
+name = "llama-cpp-orchestrator"
+version = "0.1.0"
+description = "Local llama.cpp orchestrator with OpenAI, Anthropic, and MCP compatibility layers"
+readme = "SPEC.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "httpx>=0.28.0,<1.0.0",
+  "mcp>=1.10.0,<2.0.0",
+  "psutil>=7.0.0,<8.0.0",
+  "pydantic>=2.10.0,<3.0.0",
+  "PyYAML>=6.0.0,<7.0.0",
+  "uvicorn>=0.34.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-asyncio>=0.25.0,<1.0.0",
+]
+
+[project.scripts]
+llama-orchestrator-http = "llama_orchestrator.__main__:main_http"
+llama-orchestrator-mcp = "llama_orchestrator.__main__:main_mcp"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
