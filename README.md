@@ -88,4 +88,5 @@ uv run pytest -q
 - OpenAI `POST /v1/responses` streaming is translated into `response.*` SSE events.
 - Mixed Vulkan benchmark attempts are recorded conservatively: if `llama-bench` reports separate per-device rows instead of a combined run, the result is stored as unverified and does not bias routing.
 - The MCP control plane now supports benchmark verification/deletion, route history inspection, and safe model deletion that refuses to remove models still used by aliases.
+- The MCP control plane now also includes direct `get_*` lookup tools plus runtime and benchmark summary diagnostics for quicker operator troubleshooting.
 - On this machine, experimental `Vulkan0` iGPU routing has been live-validated with the local `Qwen3.5-0.8B-UD-Q8_K_XL.gguf` model.

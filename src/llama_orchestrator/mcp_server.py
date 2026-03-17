@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from .benchmarks import BenchmarkService
@@ -50,6 +51,31 @@ def create_mcp_server(
     @mcp.tool(name="llama_list_aliases", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
     async def list_aliases() -> dict[str, Any]:
         return {"aliases": [alias.model_dump(mode="json") for alias in catalog.list_aliases()]}
+
+    @mcp.tool(name="llama_get_model", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def get_model(params: dict[str, Any]) -> dict[str, Any]:
+        model = catalog.get_model(str(params["model_id"]))
+        return {"model": model.model_dump(mode="json")}
+
+    @mcp.tool(name="llama_get_profile", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def get_profile(params: dict[str, Any]) -> dict[str, Any]:
+        profile = catalog.get_profile(str(params["profile_id"]))
+        return {"profile": profile.model_dump(mode="json")}
+
+    @mcp.tool(name="llama_get_preset", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def get_preset(params: dict[str, Any]) -> dict[str, Any]:
+        preset = catalog.get_preset(str(params["preset_id"]))
+        return {"preset": preset.model_dump(mode="json")}
+
+    @mcp.tool(name="llama_get_alias", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def get_alias(params: dict[str, Any]) -> dict[str, Any]:
+        alias, model, profile, preset = catalog.resolve_alias(str(params["alias_id"]))
+        return {
+            "alias": alias.model_dump(mode="json"),
+            "resolved_model": model.model_dump(mode="json"),
+            "resolved_profile": profile.model_dump(mode="json"),
+            "resolved_preset": preset.model_dump(mode="json"),
+        }
 
     @mcp.tool(name="llama_import_model", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def import_model(params: dict[str, Any]) -> dict[str, Any]:
@@ -110,6 +136,12 @@ def create_mcp_server(
     async def get_runtime_status() -> dict[str, Any]:
         return {"runtimes": [runtime.model_dump(mode="json") for runtime in runtime_manager.list_runtimes()]}
 
+    @mcp.tool(name="llama_get_runtime_diagnostics", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def get_runtime_diagnostics() -> dict[str, Any]:
+        inventory = hardware_probe.collect()
+        runtimes = runtime_manager.list_runtimes()
+        return _runtime_diagnostics_payload(settings, inventory.model_dump(mode="json"), [runtime.model_dump(mode="json") for runtime in runtimes])
+
     @mcp.tool(name="llama_load_alias", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def load_alias(params: dict[str, Any]) -> dict[str, Any]:
         alias_id = str(params["alias_id"])
@@ -124,6 +156,11 @@ def create_mcp_server(
             if runtime.alias_id == alias_id:
                 await runtime_manager.unload_runtime(runtime.runtime_key)
                 unloaded.append(runtime.runtime_key)
+        return {"ok": True, "unloaded": unloaded}
+
+    @mcp.tool(name="llama_unload_idle", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
+    async def unload_idle() -> dict[str, Any]:
+        unloaded = await runtime_manager.unload_idle()
         return {"ok": True, "unloaded": unloaded}
 
     @mcp.tool(name="llama_pin_alias", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
@@ -147,6 +184,12 @@ def create_mcp_server(
         alias_id = str(params["alias_id"]) if params and "alias_id" in params else None
         records = state.list_benchmarks(alias_id)
         return {"benchmarks": [record.model_dump(mode="json") for record in records]}
+
+    @mcp.tool(name="llama_benchmark_summary", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
+    async def benchmark_summary(params: dict[str, Any]) -> dict[str, Any]:
+        alias_id = str(params["alias_id"])
+        records = state.list_benchmarks(alias_id)
+        return _benchmark_summary_payload(alias_id, [record.model_dump(mode="json") for record in records])
 
     @mcp.tool(name="llama_verify_benchmark", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def verify_benchmark(params: dict[str, Any]) -> dict[str, Any]:
@@ -268,3 +311,86 @@ def create_mcp_server(
         }
 
     return mcp
+
+
+def _runtime_diagnostics_payload(settings: AppSettings, inventory: dict[str, Any], runtimes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a compact operator-facing runtime summary."""
+    now = datetime.now(timezone.utc)
+    diagnostic_rows: list[dict[str, Any]] = []
+    for runtime in runtimes:
+        last_used = _parse_datetime(runtime.get("last_used_at"))
+        launched_at = _parse_datetime(runtime.get("launched_at"))
+        diagnostic_rows.append(
+            {
+                "runtime_key": runtime.get("runtime_key"),
+                "alias_id": runtime.get("alias_id"),
+                "status": runtime.get("status"),
+                "backend": runtime.get("backend"),
+                "placement": runtime.get("placement"),
+                "experimental": bool(runtime.get("experimental")),
+                "pinned": bool(runtime.get("pinned")),
+                "idle_seconds": round((now - last_used).total_seconds(), 1) if last_used else None,
+                "uptime_seconds": round((now - launched_at).total_seconds(), 1) if launched_at else None,
+                "estimated_ram_gib": _bytes_to_gib(runtime.get("estimated_ram_bytes")),
+                "estimated_vram_gib": _bytes_to_gib(runtime.get("estimated_vram_bytes")),
+                "endpoint_url": runtime.get("endpoint_url"),
+            }
+        )
+    return {
+        "summary": {
+            "loaded_runtime_count": len(runtimes),
+            "max_loaded_instances": settings.policy.max_loaded_instances,
+            "system_ram_free_gib": _bytes_to_gib(inventory.get("system_ram_free_bytes")),
+            "system_ram_total_gib": _bytes_to_gib(inventory.get("system_ram_total_bytes")),
+            "available_backends": inventory.get("backends_available", []),
+        },
+        "runtimes": diagnostic_rows,
+    }
+
+
+def _benchmark_summary_payload(alias_id: str, records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize benchmark quality so operators can spot weak evidence quickly."""
+    best_verified: dict[str, dict[str, Any]] = {}
+    unverified_count = 0
+    for record in records:
+        metadata = dict(record.get("metadata", {}))
+        placement = str(record.get("placement"))
+        score = float(record.get("prompt_tps", 0.0)) + float(record.get("generation_tps", 0.0))
+        if not metadata.get("verified", True):
+            unverified_count += 1
+            continue
+        current = best_verified.get(placement)
+        if current is None or score > current["combined_tps"]:
+            best_verified[placement] = {
+                "backend": record.get("backend"),
+                "placement": placement,
+                "prompt_tps": record.get("prompt_tps"),
+                "generation_tps": record.get("generation_tps"),
+                "combined_tps": score,
+                "collected_at": record.get("collected_at"),
+            }
+    return {
+        "alias_id": alias_id,
+        "total_records": len(records),
+        "unverified_records": unverified_count,
+        "best_verified_by_placement": list(best_verified.values()),
+    }
+
+
+def _bytes_to_gib(value: Any) -> float | None:
+    if value is None:
+        return None
+    return round(float(value) / (1024**3), 3)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
