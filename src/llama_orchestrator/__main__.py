@@ -16,11 +16,20 @@ from .settings import AppSettings
 from .state import StateStore
 
 
+def validate_startup_config(settings: AppSettings, catalog: CatalogStore) -> None:
+    """Fail fast when the persisted configuration is not internally valid."""
+    errors = catalog.validate()
+    if errors:
+        joined = "\n".join(f"- {error}" for error in errors)
+        raise RuntimeError(f"Catalog validation failed:\n{joined}")
+
+
 def build_services():
     settings = AppSettings.load()
     settings.ensure_directories()
     catalog = CatalogStore(settings.catalog_path)
     catalog.load()
+    validate_startup_config(settings, catalog)
     state = StateStore(settings.state_path)
     hardware_probe = HardwareProbe(settings)
     router = Router(settings)

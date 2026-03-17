@@ -104,3 +104,23 @@ def test_catalog_prevents_deleting_preset_in_use(sandbox_path: Path) -> None:
 
     with pytest.raises(CatalogError):
         store.delete_preset("default")
+
+
+def test_catalog_validate_reports_missing_alias_dependencies(sandbox_path: Path) -> None:
+    catalog_path = sandbox_path / "catalog.yaml"
+    store = CatalogStore(catalog_path)
+    store.load()
+    store.document.aliases.append(
+        AliasDefinition(
+            id="broken/alias",
+            base_model_id="missing-model",
+            load_profile_id="missing-profile",
+            preset_id="missing-preset",
+        )
+    )
+
+    errors = store.validate()
+
+    assert any("missing model" in error for error in errors)
+    assert any("missing profile" in error for error in errors)
+    assert any("missing preset" in error for error in errors)

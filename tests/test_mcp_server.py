@@ -76,3 +76,20 @@ def test_benchmark_summary_payload_prefers_verified_records() -> None:
     assert payload["total_records"] == 3
     assert payload["unverified_records"] == 1
     assert payload["best_verified_by_placement"][0]["combined_tps"] == 580.0
+
+
+def test_runtime_diagnostics_handles_empty_runtime_list() -> None:
+    settings = AppSettings.load()
+
+    payload = _runtime_diagnostics_payload(
+        settings,
+        {
+            "system_ram_free_bytes": 4 * 1024**3,
+            "system_ram_total_bytes": 16 * 1024**3,
+            "backends_available": ["cpu"],
+        },
+        [],
+    )
+
+    assert payload["summary"]["loaded_runtime_count"] == 0
+    assert payload["runtimes"] == []

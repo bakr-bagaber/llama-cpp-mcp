@@ -104,6 +104,15 @@ def create_mcp_server(
         catalog.upsert_profile(profile)
         return {"ok": True, "profile": profile.model_dump(mode="json")}
 
+    @mcp.tool(name="llama_clone_profile", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
+    async def clone_profile(params: dict[str, Any]) -> dict[str, Any]:
+        source = catalog.get_profile(str(params["source_profile_id"]))
+        clone_id = str(params["new_profile_id"])
+        overrides = dict(params.get("overrides", {}))
+        profile = source.model_copy(update={"id": clone_id, **overrides})
+        catalog.upsert_profile(profile)
+        return {"ok": True, "profile": profile.model_dump(mode="json")}
+
     @mcp.tool(name="llama_update_profile", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def update_profile(params: dict[str, Any]) -> dict[str, Any]:
         profile = LoadProfile.model_validate(params)
@@ -113,6 +122,15 @@ def create_mcp_server(
     @mcp.tool(name="llama_create_preset", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
     async def create_preset(params: dict[str, Any]) -> dict[str, Any]:
         preset = GenerationPreset.model_validate(params)
+        catalog.upsert_preset(preset)
+        return {"ok": True, "preset": preset.model_dump(mode="json")}
+
+    @mcp.tool(name="llama_clone_preset", annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False})
+    async def clone_preset(params: dict[str, Any]) -> dict[str, Any]:
+        source = catalog.get_preset(str(params["source_preset_id"]))
+        clone_id = str(params["new_preset_id"])
+        overrides = dict(params.get("overrides", {}))
+        preset = source.model_copy(update={"id": clone_id, **overrides})
         catalog.upsert_preset(preset)
         return {"ok": True, "preset": preset.model_dump(mode="json")}
 
@@ -291,6 +309,20 @@ def create_mcp_server(
             ),
         )
         selected = decision.selected
+        ranked_candidates = [
+            {
+                "backend": candidate.backend.value,
+                "placement": candidate.placement.value,
+                "devices": candidate.devices,
+                "feasible": candidate.feasible,
+                "score": round(candidate.score, 3),
+                "reason": candidate.reason,
+                "support_level": candidate.support_level.value,
+                "selected": bool(selected and candidate.backend == selected.backend and candidate.placement == selected.placement),
+            }
+            for candidate in decision.candidates
+        ]
+        rejected_candidates = [candidate for candidate in ranked_candidates if not candidate["selected"]]
         summary = {
             "alias_id": alias_id,
             "selected_backend": selected.backend.value if selected else None,
@@ -299,8 +331,15 @@ def create_mcp_server(
             "reason_summary": decision.reason_summary,
             "warm_runtime_reused": bool(decision.reused_runtime_key),
             "inventory_backends": [backend.value for backend in inventory.backends_available],
+            "candidate_count": len(ranked_candidates),
+            "rejected_count": len(rejected_candidates),
         }
-        return {"summary": summary, "decision": decision.model_dump(mode="json")}
+        return {
+            "summary": summary,
+            "selected_candidate": next((candidate for candidate in ranked_candidates if candidate["selected"]), None),
+            "rejected_candidates": rejected_candidates,
+            "decision": decision.model_dump(mode="json"),
+        }
 
     @mcp.tool(name="llama_list_route_events", annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
     async def list_route_events(params: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -75,6 +75,33 @@ class CatalogStore:
         alias = self.get_alias(alias_id)
         return alias, self.get_model(alias.base_model_id), self.get_profile(alias.load_profile_id), self.get_preset(alias.preset_id)
 
+    def validate(self) -> list[str]:
+        """Return human-readable catalog validation errors.
+
+        We keep this separate from `load()` so callers can choose whether to
+        fail fast at startup or surface the problems through diagnostics.
+        """
+        errors: list[str] = []
+        model_ids = {item.id for item in self.document.models}
+        profile_ids = {item.id for item in self.document.profiles}
+        preset_ids = {item.id for item in self.document.presets}
+
+        for model in self.document.models:
+            if model.source.value == "local":
+                if not model.local_path:
+                    errors.append(f"Model '{model.id}' uses local source but has no local_path.")
+                elif not model.local_path.exists():
+                    errors.append(f"Model '{model.id}' points to missing local path '{model.local_path}'.")
+
+        for alias in self.document.aliases:
+            if alias.base_model_id not in model_ids:
+                errors.append(f"Alias '{alias.id}' references missing model '{alias.base_model_id}'.")
+            if alias.load_profile_id not in profile_ids:
+                errors.append(f"Alias '{alias.id}' references missing profile '{alias.load_profile_id}'.")
+            if alias.preset_id not in preset_ids:
+                errors.append(f"Alias '{alias.id}' references missing preset '{alias.preset_id}'.")
+        return errors
+
     def upsert_model(self, model: BaseModelDefinition) -> None:
         self._upsert_item(self.document.models, model)
         self.save()
