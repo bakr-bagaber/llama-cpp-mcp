@@ -34,27 +34,31 @@ def make_inventory(include_dgpu: bool = False, include_igpu: bool = False) -> Ha
     if include_dgpu:
         devices.append(
             HardwareDevice(
-                id="dgpu-0",
+                id="dgpu0",
                 name="RTX",
                 kind="dgpu",
+                ordinal=0,
+                selectors={"cuda": "cuda0", "vulkan": "vulkan1"},
                 backend_candidates=[Backend.CUDA],
                 total_memory_bytes=8 * 1024**3,
                 free_memory_bytes=8 * 1024**3,
-                metadata={"vulkan_selector": "Vulkan1", "vulkan_main_gpu_index": 1},
+                metadata={"vulkan_runtime_selector": "Vulkan1", "vulkan_main_gpu_index": 1},
             )
         )
         backends.append(Backend.CUDA)
     if include_igpu:
         devices.append(
             HardwareDevice(
-                id="igpu-0",
+                id="igpu0",
                 name="Intel Iris",
                 kind="igpu",
+                ordinal=0,
+                selectors={"vulkan": "vulkan0"},
                 backend_candidates=[Backend.VULKAN],
                 total_memory_bytes=4 * 1024**3,
                 free_memory_bytes=4 * 1024**3,
                 experimental=True,
-                metadata={"vulkan_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
+                metadata={"vulkan_runtime_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
             )
         )
         backends.append(Backend.VULKAN)

@@ -83,4 +83,5 @@ uv run pytest -q
 - `POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages` are the tool-capable generation endpoints.
 - `POST /v1/completions` stays text-only by design.
 - iGPU and mixed dGPU+iGPU routing are intentionally marked experimental for now.
+- Hardware inventory uses backend-agnostic ids such as `dgpu0` and `igpu0`, while also exposing backend selectors such as `cuda0` and `vulkan1` for explicit targeting and benchmarking.
 - On this machine, experimental `Vulkan0` iGPU routing has been live-validated with the local `Qwen3.5-0.8B-UD-Q8_K_XL.gguf` model.

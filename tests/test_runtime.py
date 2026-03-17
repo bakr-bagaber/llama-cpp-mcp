@@ -106,15 +106,17 @@ def test_runtime_manager_builds_vulkan_device_args() -> None:
             # from llama-bench's device list output.
             # We keep the test tiny so the launch rule stays easy to follow.
             {
-                "id": "igpu-0",
+                "id": "igpu0",
+                "ordinal": 0,
                 "name": "Intel Arc",
                 "kind": "igpu",
+                "selectors": {"vulkan": "vulkan0"},
                 "backend_candidates": [Backend.VULKAN],
-                "metadata": {"vulkan_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
+                "metadata": {"vulkan_runtime_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
             }
         ]
     )
 
-    args = RuntimeManager._device_args_for_selection(Backend.VULKAN, ["igpu-0"], inventory)
+    args = RuntimeManager._device_args_for_selection(Backend.VULKAN, ["igpu0"], inventory)
 
     assert args == ["--device", "Vulkan0", "--main-gpu", "0"]

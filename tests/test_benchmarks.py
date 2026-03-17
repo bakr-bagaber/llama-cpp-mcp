@@ -92,11 +92,13 @@ def test_run_llama_bench_uses_vulkan_device_selectors(sandbox_path: Path, monkey
     inventory = HardwareInventory(
         devices=[
             HardwareDevice(
-                id="igpu-0",
+                id="igpu0",
                 name="Intel Arc",
                 kind="igpu",
+                ordinal=0,
+                selectors={"vulkan": "vulkan0"},
                 backend_candidates=[Backend.VULKAN],
-                metadata={"vulkan_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
+                metadata={"vulkan_runtime_selector": "Vulkan0", "vulkan_main_gpu_index": 0},
             )
         ]
     )
@@ -122,7 +124,7 @@ def test_run_llama_bench_uses_vulkan_device_selectors(sandbox_path: Path, monkey
         backend=Backend.VULKAN,
         placement=PlacementKind.IGPU_ONLY,
         inventory=inventory,
-        device_ids=["igpu-0"],
+        device_ids=["igpu0"],
     )
 
     assert "--device" in captured

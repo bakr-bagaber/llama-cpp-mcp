@@ -132,10 +132,10 @@ class BenchmarkService:
         selectors: list[str] = []
         main_gpu_index: int | None = None
         for device_id in device_ids:
-            device = inventory.device_by_id(device_id)
+            device = inventory.find_device(device_id, backend=backend)
             if not device:
                 continue
-            selector = str(device.metadata.get("vulkan_selector", "")).strip()
+            selector = BenchmarkService._runtime_selector_for_backend(device, backend)
             if not selector:
                 continue
             selectors.append(selector)
@@ -160,7 +160,7 @@ class BenchmarkService:
         if backend is not Backend.VULKAN or inventory is None or not device_ids:
             return PlacementKind.DGPU_ONLY
 
-        selected_devices = [inventory.device_by_id(device_id) for device_id in device_ids]
+        selected_devices = [inventory.find_device(device_id, backend=backend) for device_id in device_ids]
         selected_devices = [device for device in selected_devices if device is not None]
         kinds = {device.kind for device in selected_devices}
         if kinds == {"igpu"}:
@@ -170,3 +170,13 @@ class BenchmarkService:
         if "igpu" in kinds and "dgpu" in kinds:
             return PlacementKind.DGPU_IGPU_MIXED
         return PlacementKind.DGPU_ONLY
+
+    @staticmethod
+    def _runtime_selector_for_backend(device, backend: Backend) -> str:
+        selector = str(device.selectors.get(backend.value, "")).strip()
+        if not selector:
+            return ""
+        suffix = selector[len(backend.value) :]
+        if backend is Backend.VULKAN:
+            return f"Vulkan{suffix}"
+        return selector

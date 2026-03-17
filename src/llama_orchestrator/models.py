@@ -158,6 +158,8 @@ class HardwareDevice(StrictModel):
     name: str
     backend_candidates: list[Backend] = Field(default_factory=list)
     kind: str = Field(description="cpu, dgpu, or igpu")
+    ordinal: int | None = Field(default=None, ge=0)
+    selectors: dict[str, str] = Field(default_factory=dict)
     total_memory_bytes: int | None = Field(default=None, ge=0)
     free_memory_bytes: int | None = Field(default=None, ge=0)
     driver: str | None = None
@@ -180,6 +182,22 @@ class HardwareInventory(StrictModel):
     def device_by_id(self, device_id: str) -> HardwareDevice | None:
         for device in self.devices:
             if device.id == device_id:
+                return device
+        return None
+
+    def find_device(self, reference: str, backend: Backend | None = None) -> HardwareDevice | None:
+        """Resolve a device by generic id or backend-specific selector."""
+        normalized = reference.strip().lower()
+        for device in self.devices:
+            if device.id.lower() == normalized:
+                return device
+        if backend is not None:
+            for device in self.devices:
+                selector = device.selectors.get(backend.value, "")
+                if selector.lower() == normalized:
+                    return device
+        for device in self.devices:
+            if any(selector.lower() == normalized for selector in device.selectors.values()):
                 return device
         return None
 

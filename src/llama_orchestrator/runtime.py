@@ -247,10 +247,10 @@ class RuntimeManager:
         selectors: list[str] = []
         main_gpu_index: int | None = None
         for device_id in device_ids:
-            device = inventory.device_by_id(device_id) if hasattr(inventory, "device_by_id") else None
+            device = inventory.find_device(device_id, backend=backend) if hasattr(inventory, "find_device") else None
             if not device:
                 continue
-            selector = str(device.metadata.get("vulkan_selector", "")).strip()
+            selector = RuntimeManager._runtime_selector_for_backend(device, backend)
             if not selector:
                 continue
             selectors.append(selector)
@@ -265,6 +265,16 @@ class RuntimeManager:
         if main_gpu_index is not None:
             args.extend(["--main-gpu", str(main_gpu_index)])
         return args
+
+    @staticmethod
+    def _runtime_selector_for_backend(device, backend: Backend) -> str:
+        selector = str(device.selectors.get(backend.value, "")).strip()
+        if not selector:
+            return ""
+        suffix = selector[len(backend.value) :]
+        if backend is Backend.VULKAN:
+            return f"Vulkan{suffix}"
+        return selector
 
     async def _wait_until_ready(self, endpoint_url: str) -> None:
         timeout = self.settings.runtime_start_timeout_seconds

@@ -35,6 +35,7 @@ class HardwareProbe:
         inventory.devices.extend(self._probe_nvidia())
         inventory.devices.extend(self._probe_windows_video_controllers(existing_names={device.name for device in inventory.devices}))
         self._attach_vulkan_metadata(inventory)
+        self._assign_generic_ids(inventory)
         inventory.backends_available = self._detect_backends(inventory)
         if not inventory.devices:
             inventory.warnings.append("No GPU devices were detected. CPU-only routing remains available.")
@@ -83,13 +84,16 @@ class HardwareProbe:
             driver = row[4].strip() if len(row) > 4 else None
             devices.append(
                 HardwareDevice(
-                    id=f"nvidia-{device_id}",
+                    id="",
                     name=name,
                     kind="dgpu",
+                    ordinal=int(device_id),
+                    selectors={Backend.CUDA.value: f"cuda{device_id}"},
                     backend_candidates=[Backend.CUDA, Backend.VULKAN],
                     total_memory_bytes=total_mib * 1024 * 1024,
                     free_memory_bytes=free_mib * 1024 * 1024,
                     driver=driver,
+                    metadata={"probe_source": "nvidia-smi"},
                 )
             )
         return devices
@@ -137,12 +141,14 @@ class HardwareProbe:
             memory = item.get("AdapterRAM")
             devices.append(
                 HardwareDevice(
-                    id=f"video-{index}",
+                    id="",
                     name=name,
                     kind=kind,
+                    ordinal=index,
                     backend_candidates=candidates,
                     total_memory_bytes=int(memory) if isinstance(memory, int) and memory > 0 else None,
                     experimental=experimental,
+                    metadata={"probe_source": "windows-video-controller"},
                 )
             )
         return devices
@@ -159,20 +165,23 @@ class HardwareProbe:
             if matched is not None:
                 if Backend.VULKAN not in matched.backend_candidates:
                     matched.backend_candidates.append(Backend.VULKAN)
-                matched.metadata["vulkan_selector"] = selector
+                matched.selectors[Backend.VULKAN.value] = self._canonical_selector(Backend.VULKAN, selector)
+                matched.metadata["vulkan_runtime_selector"] = selector
                 matched.metadata["vulkan_main_gpu_index"] = self._selector_index(selector)
                 continue
 
             inferred_kind = self._infer_device_kind(name)
             inventory.devices.append(
                 HardwareDevice(
-                    id=f"vulkan-{selector.lower()}",
+                    id="",
                     name=name,
                     kind=inferred_kind,
+                    selectors={Backend.VULKAN.value: self._canonical_selector(Backend.VULKAN, selector)},
                     backend_candidates=[Backend.VULKAN],
                     experimental=inferred_kind == "igpu",
                     metadata={
-                        "vulkan_selector": selector,
+                        "probe_source": "vulkan-device-list",
+                        "vulkan_runtime_selector": selector,
                         "vulkan_main_gpu_index": self._selector_index(selector),
                     },
                 )
@@ -220,3 +229,25 @@ class HardwareProbe:
     @staticmethod
     def _normalize_vulkan_name(name: str) -> str:
         return re.sub(r"\s+\(\d+\s+MiB,\s+\d+\s+MiB free\)$", "", name).strip()
+
+    @staticmethod
+    def _canonical_selector(backend: Backend, runtime_selector: str) -> str:
+        prefix = backend.value
+        suffix = "".join(character for character in runtime_selector if character.isdigit())
+        return f"{prefix}{suffix}" if suffix else backend.value
+
+    @staticmethod
+    def _assign_generic_ids(inventory: HardwareInventory) -> None:
+        """Assign stable generic ids like `dgpu0` and `igpu0`.
+
+        Backend-specific names such as `cuda0` and `vulkan1` remain available
+        through the `selectors` field, while `id` stays backend-agnostic.
+        """
+        kind_counters: dict[str, int] = {}
+        for device in inventory.devices:
+            if device.ordinal is None:
+                device.ordinal = kind_counters.get(device.kind, 0)
+            kind_counters[device.kind] = max(kind_counters.get(device.kind, 0), device.ordinal + 1)
+        for device in sorted(inventory.devices, key=lambda item: (item.kind, item.ordinal or 0, item.name.lower())):
+            if not device.id:
+                device.id = f"{device.kind}{device.ordinal or 0}"
