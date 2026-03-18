@@ -24,22 +24,41 @@ The project currently includes:
 
 ## Quick Start
 
-1. Sync dependencies:
+1. Install dependencies:
 
 ```powershell
 uv sync
 ```
 
-2. Start the HTTP compatibility server:
+2. Bootstrap a starter catalog if this is a fresh machine:
+
+```powershell
+uv run llama-orchestrator init-config
+```
+
+3. Validate the configuration before serving traffic:
+
+```powershell
+uv run llama-orchestrator validate-config
+```
+
+4. Start the HTTP compatibility server:
 
 ```powershell
 uv run llama-orchestrator-http
 ```
 
-3. Start the MCP control plane:
+5. Start the MCP control plane:
 
 ```powershell
 uv run llama-orchestrator-mcp
+```
+
+You can also use the unified CLI:
+
+```powershell
+uv run llama-orchestrator http
+uv run llama-orchestrator mcp
 ```
 
 ## Catalog
@@ -69,6 +88,16 @@ Optional settings:
 - `LLAMA_SERVER_CUDA`
 - `LLAMA_SERVER_VULKAN`
 - `LLAMA_SERVER_SYCL`
+- `LLAMA_BENCH_CPU`
+- `LLAMA_BENCH_CUDA`
+- `LLAMA_BENCH_VULKAN`
+- `LLAMA_BENCH_SYCL`
+
+## Deployment Notes
+
+- The package now includes a starter catalog template, so a clean install can bootstrap itself with `init-config`.
+- `validate-config` fails fast on broken alias references and missing local model files, which is useful in startup scripts and service managers.
+- The default executable discovery still looks for common Windows `llama.cpp` install paths, but explicit environment variables are preferred for portable deployments.
 
 ## Validation
 

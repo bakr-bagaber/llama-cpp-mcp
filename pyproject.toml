@@ -2,8 +2,18 @@
 name = "llama-cpp-orchestrator"
 version = "0.1.0"
 description = "Local llama.cpp orchestrator with OpenAI, Anthropic, and MCP compatibility layers"
-readme = "SPEC.md"
+readme = "README.md"
 requires-python = ">=3.12"
+license = {text = "MIT"}
+keywords = ["llama.cpp", "mcp", "openai-compatible", "anthropic-compatible", "local-llm"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Framework :: FastAPI",
+]
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "httpx>=0.28.0,<1.0.0",
@@ -21,6 +31,7 @@ test = [
 ]
 
 [project.scripts]
+llama-orchestrator = "llama_orchestrator.__main__:main"
 llama-orchestrator-http = "llama_orchestrator.__main__:main_http"
 llama-orchestrator-mcp = "llama_orchestrator.__main__:main_mcp"
 
@@ -33,6 +44,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+llama_orchestrator = ["templates/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

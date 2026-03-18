@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from llama_orchestrator.__main__ import validate_startup_config
+from llama_orchestrator.__main__ import initialize_catalog, validate_startup_config
 from llama_orchestrator.catalog import CatalogStore
 from llama_orchestrator.models import AliasDefinition, BaseModelDefinition, GenerationPreset, LoadProfile
 from llama_orchestrator.settings import AppSettings
@@ -38,3 +38,15 @@ def test_validate_startup_config_rejects_missing_local_model_path(sandbox_path: 
 
     with pytest.raises(RuntimeError):
         validate_startup_config(settings, catalog)
+
+
+def test_initialize_catalog_writes_starter_template(sandbox_path: Path) -> None:
+    target = sandbox_path / "catalog" / "catalog.yaml"
+
+    initialize_catalog(target)
+
+    text = target.read_text(encoding="utf-8")
+    assert "profiles:" in text
+    assert "presets:" in text
+    assert "balanced" in text
+    assert 'reasoning_mode: "off"' in text

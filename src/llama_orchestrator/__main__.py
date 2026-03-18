@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from importlib.resources import files
+from pathlib import Path
 
 import uvicorn
 
@@ -22,6 +24,16 @@ def validate_startup_config(settings: AppSettings, catalog: CatalogStore) -> Non
     if errors:
         joined = "\n".join(f"- {error}" for error in errors)
         raise RuntimeError(f"Catalog validation failed:\n{joined}")
+
+
+def initialize_catalog(catalog_path: Path) -> Path:
+    """Write a starter catalog when the target path does not exist yet."""
+    if catalog_path.exists():
+        return catalog_path
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    template = files("llama_orchestrator").joinpath("templates/default_catalog.yaml").read_text(encoding="utf-8")
+    catalog_path.write_text(template, encoding="utf-8")
+    return catalog_path
 
 
 def build_services():
@@ -51,8 +63,22 @@ def main_mcp() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the llama.cpp orchestrator")
-    parser.add_argument("mode", choices=["http", "mcp"], nargs="?", default="http")
+    parser.add_argument("mode", choices=["http", "mcp", "init-config", "validate-config"], nargs="?", default="http")
     args = parser.parse_args()
+    if args.mode == "init-config":
+        settings = AppSettings.load()
+        settings.ensure_directories()
+        path = initialize_catalog(settings.catalog_path)
+        print(f"Initialized starter catalog at {path}")
+        return
+    if args.mode == "validate-config":
+        settings = AppSettings.load()
+        settings.ensure_directories()
+        catalog = CatalogStore(settings.catalog_path)
+        catalog.load()
+        validate_startup_config(settings, catalog)
+        print("Configuration is valid.")
+        return
     if args.mode == "mcp":
         main_mcp()
         return

@@ -1,0 +1,15 @@
+models: []
+profiles:
+  - id: balanced
+    description: General-purpose profile with a moderate context window.
+    context_size: 8192
+    backend_preference: auto
+    gpu_layers: 99
+presets:
+  - id: precise
+    description: Low-temperature preset for reliable coding and admin tasks.
+    temperature: 0.1
+    top_p: 0.9
+    max_tokens: 1024
+    reasoning_mode: "off"
+aliases: []
