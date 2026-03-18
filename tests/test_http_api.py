@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from llama_orchestrator.catalog import CatalogStore
 from llama_orchestrator.hardware import HardwareProbe
 from llama_orchestrator.http_api import (
     _anthropic_messages_to_openai_messages,
+    _responses_input_to_messages,
     _anthropic_tool_choice_to_openai,
     _apply_preset_defaults,
     _chat_completion_to_anthropic,
@@ -17,7 +19,7 @@ from llama_orchestrator.http_api import (
     _openai_stream_to_responses_events,
     create_app,
 )
-from llama_orchestrator.models import AliasDefinition, BaseModelDefinition, GenerationPreset, LoadProfile, ReasoningMode
+from llama_orchestrator.models import AliasDefinition, BaseModelDefinition, GenerationPreset, LoadProfile, ReasoningMode, RuntimeRecord, RuntimeStatus, SupportLevel, Backend, PlacementKind
 from llama_orchestrator.router import Router
 from llama_orchestrator.runtime import RuntimeManager
 from llama_orchestrator.settings import AppSettings
@@ -131,6 +133,10 @@ def test_anthropic_tool_choice_any_maps_to_openai_required() -> None:
     assert _anthropic_tool_choice_to_openai("any") == "required"
 
 
+def test_anthropic_tool_choice_none_passes_through() -> None:
+    assert _anthropic_tool_choice_to_openai("none") == "none"
+
+
 def test_preset_defaults_add_qwen_no_think_directive(sandbox_path: Path) -> None:
     settings = AppSettings(
         catalog_path=sandbox_path / "catalog.yaml",
@@ -205,6 +211,79 @@ def test_preset_defaults_use_enable_thinking_for_qwen35(sandbox_path: Path) -> N
     assert payload["enable_thinking"] is False
     assert payload["chat_template_kwargs"]["enable_thinking"] is False
     assert payload["messages"][0]["role"] == "user"
+
+
+def test_responses_input_to_messages_supports_typed_items() -> None:
+    messages = _responses_input_to_messages(
+        [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]},
+            {"type": "input_text", "text": "world"},
+            {"type": "input_image", "image_url": "https://example.com/demo.png"},
+        ]
+    )
+
+    assert messages[0] == {"role": "user", "content": "hello"}
+    assert messages[1] == {"role": "user", "content": "world"}
+    assert messages[2] == {"role": "user", "content": "[image omitted]"}
+
+
+def test_responses_input_to_messages_rejects_unknown_item_type() -> None:
+    with pytest.raises(HTTPException):
+        _responses_input_to_messages([{"type": "mystery"}])
+
+
+def test_responses_route_accepts_instructions_and_typed_input(sandbox_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _build_app(sandbox_path)
+    captured: dict[str, object] = {}
+
+    async def fake_ensure_runtime(self, alias_id, inventory, backend_preference=None):
+        return RuntimeRecord(
+            runtime_key="demo",
+            alias_id=alias_id,
+            model_id="demo-model",
+            profile_id="balanced",
+            backend=Backend.CPU,
+            placement=PlacementKind.CPU_ONLY,
+            endpoint_url="http://127.0.0.1:1234",
+            support_level=SupportLevel.STABLE,
+            status=RuntimeStatus.READY,
+        )
+
+    async def fake_post_json(self, runtime, path, payload):
+        captured["payload"] = payload
+
+        class Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "id": "chatcmpl_1",
+                    "model": "demo/alias",
+                    "choices": [{"message": {"content": "ok", "tool_calls": []}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+
+        return Response()
+
+    monkeypatch.setattr("llama_orchestrator.http_api.RuntimeManager.ensure_runtime", fake_ensure_runtime)
+    monkeypatch.setattr("llama_orchestrator.http_api.RuntimeManager.post_json", fake_post_json)
+
+    response = client.post(
+        "/v1/responses",
+        json={
+            "model": "demo/alias",
+            "instructions": "Be concise.",
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+            "max_output_tokens": 8,
+        },
+    )
+
+    assert response.status_code == 200
+    proxied = captured["payload"]
+    assert proxied["messages"][0] == {"role": "system", "content": "Be concise."}
+    assert proxied["messages"][1] == {"role": "user", "content": "hello"}
+    assert proxied["max_tokens"] == 8
 
 
 @pytest.mark.anyio

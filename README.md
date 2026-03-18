@@ -120,4 +120,5 @@ uv run pytest -q
 - The MCP control plane now also includes direct `get_*` lookup tools plus runtime and benchmark summary diagnostics for quicker operator troubleshooting.
 - Profile and preset deletion are now dependency-aware like model deletion, and alias deletion unloads any live runtimes first.
 - Startup now fails fast on broken catalog references or missing local model files, and MCP includes clone helpers for deriving new profiles and presets from existing ones.
+- The compatibility layer now handles richer `POST /v1/responses` input shapes, including typed message items, `instructions`, and safe placeholders for non-text input blocks.
 - On this machine, experimental `Vulkan0` iGPU routing has been live-validated with the local `Qwen3.5-0.8B-UD-Q8_K_XL.gguf` model.

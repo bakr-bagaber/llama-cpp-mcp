@@ -164,21 +164,15 @@ def create_app(
         if not model:
             raise HTTPException(status_code=400, detail="The 'model' field is required.")
         runtime = await _ensure_runtime(model)
-        input_items = payload.get("input", "")
-        messages: list[dict[str, Any]] = []
-        if isinstance(input_items, str):
-            messages = [{"role": "user", "content": input_items}]
-        elif isinstance(input_items, list):
-            for item in input_items:
-                if isinstance(item, dict) and item.get("role"):
-                    messages.append({"role": item["role"], "content": _flatten_content(item.get("content", ""))})
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported 'input' payload for /v1/responses.")
+        messages = _responses_input_to_messages(payload.get("input", ""))
+        instructions = payload.get("instructions")
+        if instructions:
+            messages.insert(0, {"role": "system", "content": _flatten_content(instructions)})
         chat_payload = {
             "model": model,
             "messages": messages,
             "temperature": payload.get("temperature"),
-            "max_tokens": payload.get("max_output_tokens"),
+            "max_tokens": payload.get("max_output_tokens", payload.get("max_completion_tokens")),
             "tools": payload.get("tools"),
             "tool_choice": payload.get("tool_choice"),
             "stream": bool(payload.get("stream")),
@@ -390,10 +384,48 @@ def _flatten_content(content: Any) -> str:
                     parts.append(str(item.get("text", "")))
                 elif block_type == "tool_result":
                     parts.append(str(item.get("content", "")))
+                elif block_type in {"image", "input_image"}:
+                    parts.append("[image omitted]")
+                elif block_type in {"file", "input_file"}:
+                    parts.append("[file omitted]")
+                elif block_type == "output_text":
+                    parts.append(str(item.get("text", "")))
+                elif block_type == "tool_use":
+                    parts.append(f"[tool_use {item.get('name', 'tool')}]")
             else:
                 parts.append(str(item))
         return "\n".join(part for part in parts if part)
     return str(content)
+
+
+def _responses_input_to_messages(input_items: Any) -> list[dict[str, Any]]:
+    """Normalize OpenAI Responses-style input into chat-completions messages."""
+    if isinstance(input_items, str):
+        return [{"role": "user", "content": input_items}]
+    if not isinstance(input_items, list):
+        raise HTTPException(status_code=400, detail="Unsupported 'input' payload for /v1/responses.")
+
+    messages: list[dict[str, Any]] = []
+    for item in input_items:
+        if not isinstance(item, dict):
+            messages.append({"role": "user", "content": str(item)})
+            continue
+        if item.get("type") == "message":
+            role = str(item.get("role", "user"))
+            messages.append({"role": role, "content": _flatten_content(item.get("content", ""))})
+            continue
+        if item.get("role"):
+            messages.append({"role": str(item["role"]), "content": _flatten_content(item.get("content", ""))})
+            continue
+        block_type = item.get("type")
+        if block_type in {"input_text", "text"}:
+            messages.append({"role": "user", "content": str(item.get("text", ""))})
+            continue
+        if block_type in {"input_image", "image", "input_file", "file"}:
+            messages.append({"role": "user", "content": _flatten_content([item])})
+            continue
+        raise HTTPException(status_code=400, detail=f"Unsupported input item type '{block_type}' for /v1/responses.")
+    return messages
 
 
 def _anthropic_tool_to_openai(tool: dict[str, Any]) -> dict[str, Any]:
@@ -412,6 +444,8 @@ def _anthropic_tool_choice_to_openai(choice: Any) -> Any:
         return choice
     if choice == "any":
         return "required"
+    if choice == "none":
+        return "none"
     if isinstance(choice, dict) and choice.get("type") == "tool":
         return {"type": "function", "function": {"name": choice.get("name")}}
     return choice
