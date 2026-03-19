@@ -1,4 +1,4 @@
-﻿# Llama.cpp Orchestrator Spec
+# Llama.cpp MCP Server Spec
 
 Status: Draft v1
 
@@ -98,7 +98,7 @@ The server must never silently ignore requested tool use on an endpoint that doe
 
 ### Supervisor
 
-A Python supervisor process owns:
+A Python MCP server process owns:
 
 - the MCP server
 - the compatibility HTTP server
@@ -294,10 +294,10 @@ OpenAI-compatible and Anthropic-compatible clients choose a `model` string. That
 ### Request Flow
 
 1. Client sends request to the MCP server
-2. Orchestrator resolves alias to base model, load profile, and generation preset
+2. The MCP server resolves alias to base model, load profile, and generation preset
 3. Router chooses placement and either reuses or launches a runtime
-4. Orchestrator translates the request into the selected upstream `llama-server` format
-5. Orchestrator normalizes the response back to the client
+4. The MCP server translates the request into the selected upstream `llama-server` format
+5. The MCP server normalizes the response back to the client
 
 ### Compatibility Strategy
 
@@ -600,4 +600,5 @@ Relevant sources:
 - https://docs.anthropic.com/en/api/messages
 - https://docs.anthropic.com/en/docs/build-with-claude/token-counting
 - https://docs.anthropic.com/en/api/models-list
+
 

@@ -1,0 +1,38 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Llama.cpp MCP Server</title>
+  <desc id="desc">A dark, technical banner with layered cards and gradient accents.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#08111f"/>
+      <stop offset="0.52" stop-color="#0d1b2e"/>
+      <stop offset="1" stop-color="#13253d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="168" y1="78" x2="980" y2="290" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#48d8c6"/>
+      <stop offset="0.5" stop-color="#73a6ff"/>
+      <stop offset="1" stop-color="#f5c96a"/>
+    </linearGradient>
+    <filter id="blur" x="-50" y="-50" width="1300" height="460" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="42"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
+  <circle cx="210" cy="70" r="120" fill="#49d8c620" filter="url(#blur)"/>
+  <circle cx="1020" cy="290" r="130" fill="#73a6ff18" filter="url(#blur)"/>
+  <circle cx="890" cy="86" r="92" fill="#f5c96a16" filter="url(#blur)"/>
+  <path d="M130 232C244 160 353 130 468 130H730C842 130 954 160 1070 232" stroke="url(#accent)" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+  <g opacity="0.95">
+    <rect x="96" y="92" width="486" height="176" rx="24" fill="#0e1a2b" stroke="#2a3e5d" stroke-width="2"/>
+    <rect x="640" y="92" width="464" height="176" rx="24" fill="#0e1a2b" stroke="#2a3e5d" stroke-width="2"/>
+    <rect x="124" y="124" width="122" height="24" rx="12" fill="#48d8c6"/>
+    <rect x="124" y="164" width="302" height="18" rx="9" fill="#dce7f5" opacity="0.86"/>
+    <rect x="124" y="194" width="252" height="18" rx="9" fill="#9fb3cc" opacity="0.74"/>
+    <rect x="124" y="224" width="218" height="18" rx="9" fill="#9fb3cc" opacity="0.56"/>
+    <rect x="668" y="124" width="122" height="24" rx="12" fill="#73a6ff"/>
+    <rect x="668" y="164" width="318" height="18" rx="9" fill="#dce7f5" opacity="0.86"/>
+    <rect x="668" y="194" width="256" height="18" rx="9" fill="#9fb3cc" opacity="0.74"/>
+    <rect x="668" y="224" width="194" height="18" rx="9" fill="#9fb3cc" opacity="0.56"/>
+  </g>
+  <text x="96" y="320" fill="#f5f7fb" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="700">Llama.cpp MCP Server</text>
+  <text x="96" y="345" fill="#9fb3cc" font-family="Segoe UI, Arial, sans-serif" font-size="18">HTTP inference, MCP control, routing, benchmarks, and local model management</text>
+</svg>

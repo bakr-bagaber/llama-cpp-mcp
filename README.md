@@ -1,4 +1,6 @@
-# Llama.cpp Orchestrator
+# Llama.cpp MCP Server
+
+![Hero banner](assets/hero.svg)
 
 > Run local `llama.cpp` models behind a clean compatibility layer with two coordinated surfaces:
 >
@@ -12,6 +14,41 @@
 
 `llama.cpp` is excellent at local inference, but modern coding tools and agents usually expect hosted-model APIs.
 This project closes that gap by supervising local GGUF models and exposing them through familiar interfaces.
+
+## About This Repo
+
+This repository is built to be practical first: a local MCP server that keeps model naming stable, routing explicit, and setup approachable for people who just want their local models to behave like a polished service.
+
+If you are new here, the rough mental model is:
+
+- one catalog file for models, profiles, presets, and aliases
+- one HTTP server for inference traffic
+- one MCP server for operating the system
+- one local `llama.cpp` installation underneath it all
+
+## Tech Stack
+
+**Core runtime**
+
+- `Python 3.12`
+- `FastAPI`
+- `Uvicorn`
+- `MCP SDK`
+- `Pydantic`
+
+**Local systems**
+
+- `llama-server`
+- `llama-bench`
+- `psutil`
+- `httpx`
+- `PyYAML`
+
+**Storage and config**
+
+- `catalog/catalog.yaml`
+- `state/mcp.db`
+- environment variables
 
 With this server, you can:
 
@@ -67,7 +104,7 @@ The Python package is only one part of the setup. A working installation also ne
 | --- | --- | --- |
 | Python 3.12+ | Yes | Required by this package |
 | `uv` | Recommended | Simplest way to install and run the project |
-| `llama-server` | Yes | The orchestrator launches it for inference |
+| `llama-server` | Yes | The MCP server launches it for inference |
 | `llama-bench` | Optional | Enables benchmark collection and benchmark-aware routing evidence |
 | One or more `.gguf` files | Yes | These are the actual models you will serve |
 | `nvidia-smi` | Optional | Improves NVIDIA GPU discovery |
@@ -164,7 +201,7 @@ $env:LLAMA_MCP_PORT = "8080"
 # Optional: protect the HTTP API with a key.
 $env:LLAMA_MCP_API_KEY = "change-me"
 
-# Point the orchestrator to your catalog and state files.
+# Point the MCP server to your catalog and state files.
 $env:LLAMA_MCP_CATALOG_PATH = "$PWD\catalog\catalog.yaml"
 $env:LLAMA_MCP_STATE_PATH = "$PWD\state\mcp.db"
 
