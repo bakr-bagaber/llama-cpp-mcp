@@ -1,1042 +1,782 @@
-﻿# Llama.cpp Orchestrator
+# Llama.cpp Orchestrator
 
-Local orchestration and compatibility layer for `llama.cpp`.
+> Run local `llama.cpp` models behind a clean compatibility layer with two coordinated surfaces:
+>
+> - an **HTTP data plane** for OpenAI-style and Anthropic-style inference
+> - an **MCP control plane** for catalog management, routing, diagnostics, and benchmarking
 
-This project gives you two coordinated surfaces over your local GGUF models:
+> [!IMPORTANT]
+> **Inference goes through HTTP only.** MCP is the management/control plane. It does not serve normal completions.
 
-- an HTTP data plane for inference
-- an MCP control plane for management, diagnostics, and policy
+## Overview
 
-Inference goes through HTTP only. MCP does not serve general model completions. MCP exists to configure the system, inspect it, benchmark it, and operate it.
+`llama.cpp` is excellent at local inference, but modern coding tools and agents usually expect hosted-model APIs.
+This project closes that gap by supervising local GGUF models and exposing them through familiar interfaces.
 
-## Goal
+With this server, you can:
 
-The goal of this project is to make local `llama.cpp` models usable from modern coding and agent tools that expect hosted-model APIs.
+- call local models through OpenAI-compatible endpoints
+- call local models through Anthropic-compatible endpoints
+- give models stable alias names instead of raw filesystem paths
+- lazily load runtimes on first use and reuse warm runtimes automatically
+- unload idle runtimes and pin important ones
+- route requests using CPU, dGPU, iGPU, and benchmark evidence
+- manage the whole system through MCP tools instead of hand-editing internal state
 
-That means:
+### Highlights
 
-- OpenAI-compatible clients can talk to your local models
-- Anthropic-compatible clients can talk to your local models
-- coding tools can use stable alias names instead of raw file paths
-- the server can lazily load, reuse, and unload models automatically
-- routing decisions can consider CPU, dGPU, iGPU, mixed GPU paths, resource reserves, and benchmark history
-- operators can manage the whole system through MCP instead of hand-editing internal state
+- :rocket: Familiar HTTP APIs for local inference
+- :toolbox: MCP tools for operating the whole stack
+- :zap: Lazy load, warm reuse, and idle unload
+- :compass: Routing informed by hardware state and benchmarks
 
-## What This Project Is
-
-This project is a supervisor around upstream `llama.cpp`, not a replacement for it.
-
-It manages:
-
-- model catalog and aliases
-- load profiles and generation presets
-- local `llama-server` subprocess lifecycle
-- hardware discovery
-- routing decisions
-- benchmark collection
-- OpenAI and Anthropic compatibility translation
-- MCP-based administration
-
-It does not reimplement inference internals.
-
-## Core Design
-
-There are two separate planes:
-
-### Control Plane
-
-The control plane is the MCP server.
-
-Use it for:
-
-- importing or deleting models
-- creating and cloning profiles
-- creating and cloning presets
-- creating and updating aliases
-- pinning and unloading runtimes
-- setting memory policy
-- running and verifying benchmarks
-- inspecting hardware, routes, runtimes, and route history
-
-Do not use it for normal generation.
-
-### Data Plane
-
-The data plane is the HTTP compatibility server.
-
-Use it for:
-
-- OpenAI-style chat
-- OpenAI-style responses
-- embeddings
-- Anthropic-style messages
-- tool use through supported endpoints
-- streaming
-
-All inference traffic should go through the data plane.
-
-## Key Features
-
-- OpenAI-compatible HTTP endpoints
-- Anthropic-compatible HTTP endpoints
-- MCP control plane for administration
-- named model aliases
-- multi-model residency with configurable memory reserves
-- lazy load on first use
-- warm runtime reuse
-- idle unload
-- explicit pinning
-- benchmark-aware routing
-- CPU, dGPU, and experimental iGPU awareness
-- experimental mixed dGPU+iGPU routing
-- route explainability
-- route history
-- dependency-aware catalog lifecycle operations
-- startup validation for broken local config
-- starter catalog bootstrap for fresh installs
-
-## Current Compatibility Scope
-
-### OpenAI-Compatible Endpoints
-
-- `GET /v1/models`
-- `GET /v1/models/{model_id}`
-- `POST /v1/chat/completions`
-- `POST /v1/completions`
-- `POST /v1/embeddings`
-- `POST /v1/responses`
-
-### Anthropic-Compatible Endpoints
-
-- `GET /v1/models`
-- `GET /v1/models/{model_id}`
-- `POST /v1/messages`
-- `POST /v1/messages/count_tokens`
-
-### Tool Use
-
-Tool use is supported on the compatible generation endpoints where it belongs:
-
-- OpenAI `POST /v1/chat/completions`
-- OpenAI `POST /v1/responses`
-- Anthropic `POST /v1/messages`
-
-Legacy `POST /v1/completions` is intentionally text-only and returns a clear compatibility error if tool fields are provided.
-
-## Architecture
+## Figure 1: System View
 
 ```mermaid
 flowchart LR
-    A["Client Apps\n(OpenAI-style / Anthropic-style)"] --> B["HTTP Compatibility Server"]
-    C["Admin Clients\n(MCP)"] --> D["MCP Control Plane"]
-    B --> E["Supervisor Core"]
+    A["Client apps\nOpenAI / Anthropic compatible"] --> B["HTTP data plane"]
+    C["MCP-aware clients\nCodex, Claude Desktop, etc."] --> D["MCP control plane"]
+    B --> E["Supervisor core"]
     D --> E
     E --> F["Catalog YAML"]
-    E --> G["SQLite State"]
-    E --> H["Hardware Probe"]
+    E --> G["SQLite state"]
+    E --> H["Hardware probe"]
     E --> I["Router"]
-    E --> J["Runtime Manager"]
-    J --> K["llama-server process 1"]
-    J --> L["llama-server process 2"]
-    J --> M["llama-server process N"]
+    E --> J["Runtime manager"]
+    J --> K["llama-server process"]
 ```
 
-### Main Components
+## Contents
 
-#### Catalog
+- [What You Need](#what-you-need)
+- [Commands You Will Use](#commands-you-will-use)
+- [Windows Installation](#windows-installation-powershell)
+- [Linux Installation](#linux-installation-bash)
+- [Minimal Working Catalog](#minimal-working-catalog)
+- [Practical Use Cases](#practical-use-cases)
+- [Features and Specs](#features-and-specs)
+- [Environment Variables](#environment-variables)
+- [Current Limitations](#current-limitations)
+- [Detailed Design Spec](#detailed-design-spec)
 
-The catalog is editable YAML that defines:
+## What You Need
 
-- base models
-- load profiles
-- generation presets
-- aliases
+The Python package is only one part of the setup. A working installation also needs local `llama.cpp` binaries and at least one GGUF model.
 
-#### State Store
+| Requirement | Required | Why it matters |
+| --- | --- | --- |
+| Python 3.12+ | Yes | Required by this package |
+| `uv` | Recommended | Simplest way to install and run the project |
+| `llama-server` | Yes | The orchestrator launches it for inference |
+| `llama-bench` | Optional | Enables benchmark collection and benchmark-aware routing evidence |
+| One or more `.gguf` files | Yes | These are the actual models you will serve |
+| `nvidia-smi` | Optional | Improves NVIDIA GPU discovery |
+| Separate backend-specific binaries | Recommended | Gives more accurate backend detection and routing |
 
-The state store is SQLite and tracks:
+> [!TIP]
+> `init-config` gives you a starter catalog, but the catalog is intentionally empty of real models. You still need to add at least one model and alias before `/v1/models` becomes useful.
 
-- benchmarks
-- route history
-- verification metadata
-- runtime-related operational state
+### External Dependencies at a Glance
 
-#### Hardware Probe
+- **Bundled by Python install**: FastAPI, Uvicorn, MCP SDK, `httpx`, `psutil`, `PyYAML`, `pydantic`
+- **Not bundled**: `llama.cpp` binaries and model files
+- **Optional but valuable**: backend-specific `llama-bench` binaries
 
-The hardware probe collects:
+## Commands You Will Use
 
-- CPU count
-- free/total RAM
-- dGPU inventory
-- iGPU inventory
-- available backends
-- backend selector metadata such as `cuda0` and `vulkan1`
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `uv run llama-mcp init-config` | Writes a starter catalog file if one does not exist | First-time setup |
+| `uv run llama-mcp validate-config` | Validates catalog references and local model paths | Before starting servers |
+| `uv run llama-mcp http` | Starts the OpenAI/Anthropic-compatible HTTP server | For inference traffic |
+| `uv run llama-mcp mcp` | Starts the MCP server over stdio | For admin/control-plane tools |
 
-#### Router
+If you install the package as a normal script-based app, these entry points also exist:
 
-The router chooses a placement using:
+- `llama-mcp`
+- `llama-mcp-http`
+- `llama-mcp-server`
 
-- fit checks
-- reserve policy
-- backend availability
-- warm runtime reuse
-- benchmark evidence
-- backend preference
-- experimental placement gating
+## Windows Installation (PowerShell)
 
-#### Runtime Manager
+These steps are written for someone starting from scratch.
 
-The runtime manager:
+### 1. Install Python and `uv`
 
-- launches `llama-server`
-- health-checks it
-- reuses warm instances
-- unloads idle instances
-- evicts when needed
-- pins when requested
+Install:
 
-## Catalog Concepts
+- [Python 3.12+](https://www.python.org/)
+- [`uv`](https://docs.astral.sh/uv/)
 
-The system intentionally separates four concepts.
-
-### Base Model
-
-A base model describes the actual GGUF artifact.
-
-Typical fields:
-
-- `id`
-- `display_name`
-- `source`
-- `local_path`
-- `family`
-- `quantization`
-- `capabilities`
-- `size_bytes`
-- `estimated_ram_bytes`
-- `estimated_vram_bytes`
-
-### Load Profile
-
-A load profile describes settings that may affect runtime loading and placement.
-
-Typical fields:
-
-- `context_size`
-- `threads`
-- `batch_size`
-- `ubatch_size`
-- `backend_preference`
-- `gpu_layers`
-- `tensor_split`
-- `flash_attention`
-- `embedding_mode`
-- `idle_unload_seconds`
-
-### Generation Preset
-
-A preset describes request-time defaults.
-
-Typical fields:
-
-- `temperature`
-- `top_p`
-- `top_k`
-- `repeat_penalty`
-- `max_tokens`
-- `stop`
-- `grammar`
-- `reasoning_mode`
-
-### Alias
-
-An alias is the client-facing model name.
-
-Examples:
-
-- `qwen3.5-0.8b/precise-auto`
-- `qwen3.5-0.8b/precise-cpu`
-- `my-coder/fast`
-
-An alias resolves to:
-
-- one base model
-- one load profile
-- one generation preset
-
-This is the `model` string clients see and use.
-
-## Routing Model
-
-The router currently considers placements such as:
-
-- `cpu_only`
-- `dgpu_only`
-- `igpu_only`
-- `cpu_dgpu_hybrid`
-- `cpu_igpu_hybrid`
-- `dgpu_igpu_mixed`
-
-### Stability Levels
-
-Stable:
-
-- `cpu_only`
-- `dgpu_only`
-- `cpu_dgpu_hybrid`
-
-Experimental:
-
-- `igpu_only`
-- `cpu_igpu_hybrid`
-- `dgpu_igpu_mixed`
-
-### Important Note on Mixed GPU Routing
-
-Mixed dGPU+iGPU routing exists from the beginning, but it is treated conservatively.
-
-If benchmark evidence does not clearly prove a true mixed-device run, the router will not treat the path as strongly validated. For example, if `llama-bench` reports separate per-device rows instead of a clearly combined run, the result is recorded as unverified.
-
-## Memory Policy
-
-The server supports adjustable reserve buffers so local models do not consume the whole machine.
-
-Main policy fields:
-
-- `min_free_system_ram_bytes`
-- `min_free_dgpu_vram_bytes`
-- `min_free_igpu_shared_ram_bytes`
-- `max_loaded_instances`
-- `max_concurrent_requests_per_runtime`
-- `allow_experimental_igpu`
-- `allow_experimental_mixed_gpu`
-
-These can be controlled through environment variables or the MCP control plane.
-
-## Runtime Lifecycle
-
-### Lazy Load
-
-Models are only loaded when first needed, unless explicitly prewarmed.
-
-### Warm Reuse
-
-Compatible requests reuse already-running `llama-server` instances.
-
-### Idle Unload
-
-Idle runtimes are unloaded after their configured timeout.
-
-### Pinning
-
-Pinned runtimes are protected from normal idle eviction.
-
-### Safe Deletion
-
-Catalog lifecycle operations are dependency-aware:
-
-- models cannot be deleted while aliases still reference them
-- profiles cannot be deleted while aliases still reference them
-- presets cannot be deleted while aliases still reference them
-- aliases unload live runtimes before deletion
-
-## Packaging and Deployment
-
-The package is installable as a normal Python project and now includes:
-
-- package metadata
-- script entry points
-- a unified CLI
-- a starter catalog template
-- startup config validation
-
-### CLI Commands
-
-- `llama-mcp http`
-- `llama-mcp mcp`
-- `llama-mcp init-config`
-- `llama-mcp validate-config`
-
-### Why `init-config` Exists
-
-On a fresh machine, you often want the project to create a usable starter catalog before you customize it. The `init-config` command writes that starter file for you.
-
-### Why `validate-config` Exists
-
-Broken local catalogs are easy to create when model files move or aliases reference deleted objects. `validate-config` fails fast before the server starts serving traffic.
-
-## Installation
-
-### Requirements
-
-- Python 3.12+
-- `uv` recommended for dependency management
-- a local `llama.cpp` build with `llama-server`
-- optional `llama-bench` binaries for benchmark-aware routing
-
-### Recommended Layout
-
-You can use any layout, but the project expects a writable catalog path and state path.
-
-Example:
-
-- project install
-- local GGUF models directory
-- local `llama.cpp` executables
-
-## Quick Start
-
-### Windows
-
-Install dependencies:
+Verify both are available:
 
 ```powershell
+python --version
+uv --version
+```
+
+### 2. Get `llama.cpp` binaries
+
+You need at least one working `llama-server.exe`.
+If you want routing and benchmarking to understand multiple backends cleanly, keep separate builds for CPU, CUDA, Vulkan, and/or SYCL.
+
+This repo already auto-detects the following Windows paths when they exist:
+
+```text
+C:\llama.cpp\cpu\llama-server.exe
+C:\llama.cpp\cuda13\llama-server.exe
+C:\llama.cpp\cuda\llama-server.exe
+C:\llama.cpp\vulkan\llama-server.exe
+C:\llama.cpp\sycl\llama-server.exe
+
+C:\llama.cpp\cpu\llama-bench.exe
+C:\llama.cpp\cuda13\llama-bench.exe
+C:\llama.cpp\cuda\llama-bench.exe
+C:\llama.cpp\vulkan\llama-bench.exe
+C:\llama.cpp\sycl\llama-bench.exe
+```
+
+You can also point to custom paths explicitly with environment variables in step 4.
+
+### 3. Clone the repo and install Python dependencies
+
+```powershell
+# Clone the repository.
+git clone <YOUR_REPO_URL>
+cd llama.cpp-mcp-server
+
+# Install runtime dependencies.
 uv sync
+
+# Optional: include test dependencies too.
+# uv sync --extra test
 ```
 
-Bootstrap a starter catalog:
+### 4. Set environment variables
+
+Use this if your binaries are not in the default Windows locations, or if you want the setup to be explicit and easy to debug.
 
 ```powershell
-uv run llama-mcp init-config
-```
-
-Validate your configuration:
-
-```powershell
-uv run llama-mcp validate-config
-```
-
-Start the HTTP server:
-
-```powershell
-uv run llama-mcp http
-```
-
-Start the MCP server:
-
-```powershell
-uv run llama-mcp mcp
-```
-
-### Linux
-
-Install dependencies:
-
-```bash
-uv sync
-```
-
-Bootstrap a starter catalog:
-
-```bash
-uv run llama-mcp init-config
-```
-
-Validate your configuration:
-
-```bash
-uv run llama-mcp validate-config
-```
-
-Start the HTTP server:
-
-```bash
-uv run llama-mcp http
-```
-
-Start the MCP server:
-
-```bash
-uv run llama-mcp mcp
-```
-
-## Environment Variables
-
-### Core Server
-
-- `LLAMA_MCP_HOST`
-- `LLAMA_MCP_PORT`
-- `LLAMA_MCP_API_KEY`
-- `LLAMA_MCP_CATALOG_PATH`
-- `LLAMA_MCP_STATE_PATH`
-
-### Runtime Behavior
-
-- `LLAMA_MCP_IDLE_SCAN_SECONDS`
-- `LLAMA_MCP_RUNTIME_START_TIMEOUT`
-- `LLAMA_MCP_HTTP_TIMEOUT`
-- `LLAMA_MCP_DEFAULT_IDLE_UNLOAD`
-
-### Memory Policy
-
-- `LLAMA_MCP_MIN_FREE_RAM`
-- `LLAMA_MCP_MIN_FREE_DGPU_VRAM`
-- `LLAMA_MCP_MIN_FREE_IGPU_RAM`
-- `LLAMA_MCP_MAX_LOADED`
-- `LLAMA_MCP_MAX_CONCURRENCY`
-- `LLAMA_MCP_ALLOW_EXPERIMENTAL_IGPU`
-- `LLAMA_MCP_ALLOW_EXPERIMENTAL_MIXED`
-
-### Backend Executables
-
-- `LLAMA_SERVER_CPU`
-- `LLAMA_SERVER_CUDA`
-- `LLAMA_SERVER_VULKAN`
-- `LLAMA_SERVER_SYCL`
-
-### Benchmark Executables
-
-- `LLAMA_BENCH_CPU`
-- `LLAMA_BENCH_CUDA`
-- `LLAMA_BENCH_VULKAN`
-- `LLAMA_BENCH_SYCL`
-
-## Example Configuration
-
-### Windows Example
-
-```powershell
+# Optional but recommended: lock the server to localhost + a known port.
 $env:LLAMA_MCP_HOST = "127.0.0.1"
 $env:LLAMA_MCP_PORT = "8080"
-$env:LLAMA_MCP_CATALOG_PATH = "C:\llama-mcp\catalog\catalog.yaml"
-$env:LLAMA_MCP_STATE_PATH = "C:\llama-mcp\state\mcp.db"
+
+# Optional: protect the HTTP API with a key.
+$env:LLAMA_MCP_API_KEY = "change-me"
+
+# Point the orchestrator to your catalog and state files.
+$env:LLAMA_MCP_CATALOG_PATH = "$PWD\catalog\catalog.yaml"
+$env:LLAMA_MCP_STATE_PATH = "$PWD\state\mcp.db"
+
+# Point to the llama.cpp binaries you actually have.
 $env:LLAMA_SERVER_CPU = "C:\llama.cpp\cpu\llama-server.exe"
 $env:LLAMA_SERVER_CUDA = "C:\llama.cpp\cuda13\llama-server.exe"
 $env:LLAMA_SERVER_VULKAN = "C:\llama.cpp\vulkan\llama-server.exe"
+$env:LLAMA_SERVER_SYCL = "C:\llama.cpp\sycl\llama-server.exe"
+
+# Optional benchmark binaries.
 $env:LLAMA_BENCH_CPU = "C:\llama.cpp\cpu\llama-bench.exe"
 $env:LLAMA_BENCH_CUDA = "C:\llama.cpp\cuda13\llama-bench.exe"
 $env:LLAMA_BENCH_VULKAN = "C:\llama.cpp\vulkan\llama-bench.exe"
+$env:LLAMA_BENCH_SYCL = "C:\llama.cpp\sycl\llama-bench.exe"
 ```
 
-### Linux Example
+> [!NOTE]
+> The `$env:...` commands above only affect the current PowerShell session. If you want them to persist, add them to your user or system environment variables.
+
+### 5. Bootstrap the config
+
+```powershell
+uv run llama-mcp init-config
+```
+
+This creates a starter catalog if it does not already exist.
+
+### 6. Add a real model and alias
+
+Open `catalog/catalog.yaml` and replace the starter content with a real model definition. A copyable minimal example is in [Minimal Working Catalog](#minimal-working-catalog).
+
+### 7. Validate the setup
+
+```powershell
+uv run llama-mcp validate-config
+```
+
+You should see:
+
+```text
+Configuration is valid.
+```
+
+### 8. Start the HTTP server
+
+```powershell
+uv run llama-mcp http
+```
+
+The default bind address is `127.0.0.1:8080`.
+
+### 9. Start the MCP server in a second terminal
+
+```powershell
+uv run llama-mcp mcp
+```
+
+This starts the MCP server over **stdio**, which is the transport most desktop MCP clients expect.
+
+### 10. Smoke test the HTTP surface
+
+```powershell
+# Health check.
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/health"
+
+# List the aliases that clients can use.
+Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -Headers @{
+  "Authorization" = "Bearer change-me"
+}
+```
+
+If you did not set `LLAMA_MCP_API_KEY`, remove the `Authorization` header.
+
+## Linux Installation (Bash)
+
+### 1. Install Python and `uv`
+
+Install:
+
+- [Python 3.12+](https://www.python.org/)
+- [`uv`](https://docs.astral.sh/uv/)
+
+Verify both are available:
 
 ```bash
-export LLAMA_MCP_HOST="127.0.0.1"
-export LLAMA_MCP_PORT="8080"
-export LLAMA_MCP_CATALOG_PATH="$HOME/.config/llama-mcp/catalog.yaml"
-export LLAMA_MCP_STATE_PATH="$HOME/.local/share/llama-mcp/mcp.db"
-export LLAMA_SERVER_CPU="/opt/llama.cpp/cpu/llama-server"
-export LLAMA_SERVER_CUDA="/opt/llama.cpp/cuda/llama-server"
-export LLAMA_SERVER_VULKAN="/opt/llama.cpp/vulkan/llama-server"
-export LLAMA_BENCH_CPU="/opt/llama.cpp/cpu/llama-bench"
-export LLAMA_BENCH_CUDA="/opt/llama.cpp/cuda/llama-bench"
-export LLAMA_BENCH_VULKAN="/opt/llama.cpp/vulkan/llama-bench"
+python3 --version
+uv --version
 ```
 
-## Catalog File Guide
+### 2. Build or install `llama.cpp`
 
-The default catalog path is:
+You need at least one `llama-server` binary.
+If you want backend-aware routing and benchmarking to be predictable, keep explicit binaries for the backends you plan to use.
 
-- `catalog/catalog.yaml`
+Typical examples:
 
-The package can also bootstrap a starter catalog.
+```text
+$HOME/llama.cpp/build-cpu/bin/llama-server
+$HOME/llama.cpp/build-cuda/bin/llama-server
+$HOME/llama.cpp/build-vulkan/bin/llama-server
+$HOME/llama.cpp/build-sycl/bin/llama-server
+```
 
-### Starter Example
+and optionally:
+
+```text
+$HOME/llama.cpp/build-cpu/bin/llama-bench
+$HOME/llama.cpp/build-cuda/bin/llama-bench
+$HOME/llama.cpp/build-vulkan/bin/llama-bench
+$HOME/llama.cpp/build-sycl/bin/llama-bench
+```
+
+### 3. Clone the repo and install Python dependencies
+
+```bash
+# Clone the repository.
+git clone <YOUR_REPO_URL>
+cd llama.cpp-mcp-server
+
+# Install runtime dependencies.
+uv sync
+
+# Optional: include test dependencies too.
+# uv sync --extra test
+```
+
+### 4. Export environment variables
+
+```bash
+# Optional but recommended: explicit host/port.
+export LLAMA_MCP_HOST="127.0.0.1"
+export LLAMA_MCP_PORT="8080"
+
+# Optional: protect the HTTP API with a key.
+export LLAMA_MCP_API_KEY="change-me"
+
+# Explicit config paths.
+export LLAMA_MCP_CATALOG_PATH="$PWD/catalog/catalog.yaml"
+export LLAMA_MCP_STATE_PATH="$PWD/state/mcp.db"
+
+# Backend-specific llama.cpp executables.
+export LLAMA_SERVER_CPU="$HOME/llama.cpp/build-cpu/bin/llama-server"
+export LLAMA_SERVER_CUDA="$HOME/llama.cpp/build-cuda/bin/llama-server"
+export LLAMA_SERVER_VULKAN="$HOME/llama.cpp/build-vulkan/bin/llama-server"
+export LLAMA_SERVER_SYCL="$HOME/llama.cpp/build-sycl/bin/llama-server"
+
+# Optional benchmark executables.
+export LLAMA_BENCH_CPU="$HOME/llama.cpp/build-cpu/bin/llama-bench"
+export LLAMA_BENCH_CUDA="$HOME/llama.cpp/build-cuda/bin/llama-bench"
+export LLAMA_BENCH_VULKAN="$HOME/llama.cpp/build-vulkan/bin/llama-bench"
+export LLAMA_BENCH_SYCL="$HOME/llama.cpp/build-sycl/bin/llama-bench"
+```
+
+> [!TIP]
+> On Linux, the HTTP server can still fall back to `llama-server` from `PATH` for runtime launch, but explicit `LLAMA_SERVER_*` variables make backend detection, routing, and troubleshooting much clearer.
+
+### 5. Bootstrap the config
+
+```bash
+uv run llama-mcp init-config
+```
+
+### 6. Add a real model and alias
+
+Open `catalog/catalog.yaml` and replace the starter content with a real model definition. A copyable minimal example is below.
+
+### 7. Validate the setup
+
+```bash
+uv run llama-mcp validate-config
+```
+
+You should see:
+
+```text
+Configuration is valid.
+```
+
+### 8. Start the HTTP server
+
+```bash
+uv run llama-mcp http
+```
+
+### 9. Start the MCP server in another shell
+
+```bash
+uv run llama-mcp mcp
+```
+
+### 10. Smoke test the HTTP surface
+
+```bash
+# Health check.
+curl http://127.0.0.1:8080/health
+
+# List available aliases.
+curl \
+  -H "Authorization: Bearer change-me" \
+  http://127.0.0.1:8080/v1/models
+```
+
+If you did not set `LLAMA_MCP_API_KEY`, omit the `Authorization` header.
+
+## Minimal Working Catalog
+
+This is the smallest realistic catalog that makes the server useful.
+Replace the model path with a real `.gguf` file on your machine.
 
 ```yaml
-models: []
+# Actual GGUF model files live here.
+models:
+  - id: qwen3.5-0.8b
+    display_name: Qwen 3.5 0.8B Instruct
+    source: local
+    local_path: /absolute/path/to/qwen3.5-0.8b-instruct-q8_0.gguf # On Windows, C:/models/... also works.
+    family: qwen3.5
+    quantization: Q8_0
+    capabilities: [chat, completion, tools]
+    size_bytes: 934000000
+    estimated_ram_bytes: 2147483648
+    estimated_vram_bytes: 1073741824
+
+# Load profiles affect launch and placement decisions.
 profiles:
   - id: balanced
     description: General-purpose profile with a moderate context window.
     context_size: 8192
     backend_preference: auto
     gpu_layers: 99
+
+# Presets affect request-time defaults.
 presets:
   - id: precise
-    description: Low-temperature preset for reliable coding and admin tasks.
+    description: Low-temperature preset for coding and admin tasks.
     temperature: 0.1
     top_p: 0.9
     max_tokens: 1024
-    reasoning_mode: "off"
-aliases: []
-```
+    reasoning_mode: off
 
-### Example Real Model Entry
-
-```yaml
-models:
-  - id: qwen3.5-0.8b-q8
-    display_name: Qwen3.5 0.8B Q8
-    source: local
-    local_path: C:\llama.cpp\models\Qwen3.5-0.8B-UD-Q8_K_XL.gguf
-    family: qwen3.5
-    quantization: Q8_K_XL
-    size_bytes: 1175481600
-    estimated_ram_bytes: 2147483648
-    estimated_vram_bytes: 1073741824
-```
-
-### Example Alias Setup
-
-```yaml
-profiles:
-  - id: cpu-safe
-    context_size: 8192
-    backend_preference: force_cpu
-    threads: 8
-  - id: auto-balanced
-    context_size: 8192
-    backend_preference: auto
-    threads: 8
-    gpu_layers: 99
-
-presets:
-  - id: precise
-    temperature: 0.1
-    top_p: 0.9
-    max_tokens: 1024
-    reasoning_mode: "off"
-
+# Aliases are the names clients actually send in API requests.
 aliases:
-  - id: qwen3.5-0.8b/precise-cpu
-    base_model_id: qwen3.5-0.8b-q8
-    load_profile_id: cpu-safe
-    preset_id: precise
   - id: qwen3.5-0.8b/precise-auto
-    base_model_id: qwen3.5-0.8b-q8
-    load_profile_id: auto-balanced
+    base_model_id: qwen3.5-0.8b
+    load_profile_id: balanced
     preset_id: precise
+    capabilities: [chat, completion, tools]
 ```
 
-## User Guide
+> [!IMPORTANT]
+> Clients send the **alias id**, not the base model id. In the example above, the usable client-facing model name is `qwen3.5-0.8b/precise-auto`.
 
-### 1. Bootstrap a New Machine
+## Figure 2: Catalog Relationships
 
-#### Windows
-
-```powershell
-uv sync
-uv run llama-mcp init-config
-notepad .\catalog\catalog.yaml
-uv run llama-mcp validate-config
+```mermaid
+flowchart LR
+    M["Base model\nGGUF artifact"] --> A["Alias\nclient-facing model name"]
+    P["Load profile\ncontext, threads, gpu_layers"] --> A
+    R["Generation preset\ntemperature, max_tokens, reasoning"] --> A
+    A --> C["HTTP client request\nmodel = alias id"]
 ```
 
-#### Linux
+## Practical Use Cases
+
+These examples are intentionally commented so a new user can understand what is happening while copying them.
+
+### 1. OpenAI-Compatible Chat Completion
 
 ```bash
-uv sync
-uv run llama-mcp init-config
-$EDITOR ./catalog/catalog.yaml
-uv run llama-mcp validate-config
-```
-
-### 2. Start the Servers
-
-#### HTTP
-
-Windows:
-
-```powershell
-uv run llama-mcp http
-```
-
-Linux:
-
-```bash
-uv run llama-mcp http
-```
-
-#### MCP
-
-Windows:
-
-```powershell
-uv run llama-mcp mcp
-```
-
-Linux:
-
-```bash
-uv run llama-mcp mcp
-```
-
-### 3. Use It as an OpenAI-Compatible Server
-
-List models:
-
-#### Windows PowerShell
-
-```powershell
-Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8080/v1/models"
-```
-
-#### Linux
-
-```bash
-curl http://127.0.0.1:8080/v1/models
-```
-
-Chat completion:
-
-#### Windows PowerShell
-
-```powershell
-$body = @{
-  model = "qwen3.5-0.8b/precise-auto"
-  messages = @(
-    @{ role = "user"; content = "Reply with exactly HELLO and nothing else." }
-  )
-  max_tokens = 8
-} | ConvertTo-Json -Depth 10
-
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/v1/chat/completions" -ContentType "application/json" -Body $body
-```
-
-#### Linux
-
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
+# Ask the local model a question through the OpenAI-compatible surface.
+# The model name must be an alias from catalog/catalog.yaml.
+curl \
+  -X POST http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me" \
   -d '{
     "model": "qwen3.5-0.8b/precise-auto",
-    "messages": [{"role":"user","content":"Reply with exactly HELLO and nothing else."}],
-    "max_tokens": 8
+    "messages": [
+      {"role": "system", "content": "You are a concise coding assistant."},
+      {"role": "user", "content": "Explain what lazy loading means in one paragraph."}
+    ]
   }'
 ```
 
-### 4. Use It as an OpenAI Responses API
+What happens behind the scenes:
 
-#### Windows PowerShell
+- the server resolves the alias to a base model + profile + preset
+- the router chooses a placement based on resources and policy
+- if the runtime is not already warm, `llama-server` is launched automatically
+- the request is proxied to that runtime and returned in OpenAI-compatible format
 
-```powershell
-$body = @{
-  model = "qwen3.5-0.8b/precise-cpu"
-  instructions = "Be concise."
-  input = @(
-    @{
-      type = "message"
-      role = "user"
-      content = @(
-        @{ type = "input_text"; text = "Reply with exactly OK and nothing else." }
-      )
-    }
-  )
-  max_output_tokens = 8
-} | ConvertTo-Json -Depth 20
-
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/v1/responses" -ContentType "application/json" -Body $body
-```
-
-#### Linux
+### 2. OpenAI Responses API with Tool Definitions
 
 ```bash
-curl http://127.0.0.1:8080/v1/responses \
+# Use the Responses-style endpoint.
+# Internally, the server translates this into a chat-completions-style request.
+curl \
+  -X POST http://127.0.0.1:8080/v1/responses \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me" \
   -d '{
-    "model": "qwen3.5-0.8b/precise-cpu",
-    "instructions": "Be concise.",
+    "model": "qwen3.5-0.8b/precise-auto",
+    "instructions": "Answer clearly and call tools when needed.",
     "input": [
       {
         "type": "message",
         "role": "user",
-        "content": [{"type":"input_text","text":"Reply with exactly OK and nothing else."}]
+        "content": [
+          {"type": "input_text", "text": "What files are in the current project root?"}
+        ]
       }
     ],
-    "max_output_tokens": 8
-  }'
-```
-
-### 5. Use It as an Anthropic-Compatible Server
-
-#### Windows PowerShell
-
-```powershell
-$headers = @{
-  "Content-Type" = "application/json"
-  "anthropic-version" = "2023-06-01"
-}
-
-$body = @{
-  model = "qwen3.5-0.8b/precise-cpu"
-  max_tokens = 8
-  messages = @(
-    @{
-      role = "user"
-      content = @(
-        @{ type = "text"; text = "Reply with exactly HI and nothing else." }
-      )
-    }
-  )
-} | ConvertTo-Json -Depth 20
-
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/v1/messages" -Headers $headers -Body $body
-```
-
-#### Linux
-
-```bash
-curl http://127.0.0.1:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "qwen3.5-0.8b/precise-cpu",
-    "max_tokens": 8,
-    "messages": [
+    "tools": [
       {
-        "role": "user",
-        "content": [{"type":"text","text":"Reply with exactly HI and nothing else."}]
+        "type": "function",
+        "function": {
+          "name": "list_files",
+          "description": "List files in the current directory.",
+          "parameters": {
+            "type": "object",
+            "properties": {}
+          }
+        }
       }
     ]
   }'
 ```
 
-### 6. Use Tool Calling
+Good to know:
 
-OpenAI-style chat example:
+- `/v1/responses` is supported
+- tool use is supported here
+- typed `input` items such as `message`, `input_text`, `input_image`, and `input_file` are normalized into chat messages
+
+### 3. Anthropic-Compatible Messages
+
+```bash
+# Use the Anthropic-compatible surface.
+# The anthropic-version header is required.
+curl \
+  -X POST http://127.0.0.1:8080/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "qwen3.5-0.8b/precise-auto",
+    "max_tokens": 256,
+    "messages": [
+      {"role": "user", "content": "Write three bullets about why local inference is useful."}
+    ]
+  }'
+```
+
+Good to know:
+
+- `/v1/messages` is translated to the OpenAI-style chat format internally
+- tool use is supported here too
+- `/v1/messages/count_tokens` currently returns an approximate token count, not a tokenizer-perfect one
+
+### 4. Use MCP to Import a Model and Create an Alias
+
+The exact JSON-RPC envelope depends on your MCP client, but these are the tool names and arguments you will call.
+
+**Import a local model**
 
 ```json
 {
-  "model": "qwen3.5-0.8b/precise-auto",
-  "messages": [{"role":"user","content":"Call the weather tool for Kuala Lumpur."}],
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "get_weather",
-        "description": "Get weather",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "location": {"type": "string"}
-          },
-          "required": ["location"]
-        }
-      }
-    }
-  ]
+  "id": "qwen3.5-0.8b",
+  "display_name": "Qwen 3.5 0.8B Instruct",
+  "source": "local",
+  "local_path": "/absolute/path/to/qwen3.5-0.8b-instruct-q8_0.gguf",
+  "family": "qwen3.5",
+  "quantization": "Q8_0",
+  "capabilities": ["chat", "completion", "tools"]
 }
 ```
 
-Anthropic-style tool example:
+Call it with the MCP tool name:
+
+```text
+llama_import_model
+```
+
+**Create an alias**
 
 ```json
 {
-  "model": "qwen3.5-0.8b/precise-auto",
-  "max_tokens": 256,
-  "messages": [
-    {
-      "role": "user",
-      "content": [{"type":"text","text":"Call the weather tool for Kuala Lumpur."}]
-    }
-  ],
-  "tools": [
-    {
-      "name": "get_weather",
-      "description": "Get weather",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "location": {"type": "string"}
-        },
-        "required": ["location"]
-      }
-    }
-  ]
+  "id": "qwen3.5-0.8b/precise-auto",
+  "base_model_id": "qwen3.5-0.8b",
+  "load_profile_id": "balanced",
+  "preset_id": "precise",
+  "capabilities": ["chat", "completion", "tools"]
 }
 ```
 
-## MCP User Guide
+Call it with:
 
-The MCP server is meant for operators, not inference clients.
+```text
+llama_create_alias
+```
 
-### Main MCP Tool Groups
+### 5. Explain a Route Before Sending Real Traffic
 
-#### Catalog Tools
+This is one of the most useful operator workflows.
+Ask MCP why a route was chosen before you benchmark or troubleshoot.
 
-- `llama_list_models`
-- `llama_get_model`
-- `llama_import_model`
-- `llama_delete_model`
-- `llama_list_profiles`
-- `llama_get_profile`
-- `llama_create_profile`
-- `llama_update_profile`
-- `llama_clone_profile`
-- `llama_delete_profile`
-- `llama_list_presets`
-- `llama_get_preset`
-- `llama_create_preset`
-- `llama_update_preset`
-- `llama_clone_preset`
-- `llama_delete_preset`
-- `llama_list_aliases`
-- `llama_get_alias`
-- `llama_create_alias`
-- `llama_update_alias`
-- `llama_delete_alias`
+Tool name:
 
-#### Runtime Tools
+```text
+llama_route_explain
+```
 
-- `llama_get_runtime_status`
-- `llama_get_runtime_diagnostics`
-- `llama_load_alias`
-- `llama_unload_alias`
-- `llama_unload_idle`
-- `llama_pin_alias`
+Arguments:
 
-#### Policy Tools
+```json
+{
+  "alias_id": "qwen3.5-0.8b/precise-auto"
+}
+```
 
-- `llama_get_memory_policy`
-- `llama_set_memory_policy`
+You will get a response that summarizes:
 
-#### Benchmark and Routing Tools
-
-- `llama_run_benchmark`
-- `llama_record_benchmark`
-- `llama_list_benchmarks`
-- `llama_benchmark_summary`
-- `llama_verify_benchmark`
-- `llama_delete_benchmark`
-- `llama_route_explain`
-- `llama_route_simulate`
-- `llama_list_route_events`
-
-#### Hardware Tools
-
-- `llama_get_hardware`
-
-### Common MCP Workflows
-
-#### Import a Local Model
-
-Conceptually:
-
-1. call `llama_import_model`
-2. create or reuse a profile
-3. create or reuse a preset
-4. create an alias
-
-#### Clone a Profile
-
-Use `llama_clone_profile` when you want a profile that is mostly the same as an existing one but with a few overrides.
-
-Example intent:
-
-- clone `balanced` into `balanced-long`
-- override `context_size`
-
-#### Clone a Preset
-
-Use `llama_clone_preset` when you want a small variant of a preset.
-
-Example intent:
-
-- clone `precise` into `creative`
-- override `temperature`
-
-#### Explain a Route
-
-Use `llama_route_explain` to see:
-
-- selected backend
-- selected placement
-- selected devices
-- ranked rejected candidates
-- why the winner was selected
+- the selected backend
+- the selected placement
+- which candidates were rejected
 - whether a warm runtime would be reused
+- why the winning route scored best
 
-#### Verify a Benchmark
+## Features and Specs
 
-Use `llama_verify_benchmark` when you manually confirm that a benchmark really represents a trustworthy placement, especially for experimental mixed GPU paths.
+### Core Product Surfaces
 
-## Deployment Guide
+| Surface | Purpose | What it is for | What it is not for |
+| --- | --- | --- | --- |
+| HTTP data plane | Inference compatibility layer | Chat, completions, embeddings, responses, Anthropic messages, streaming | Editing the catalog, managing runtimes, benchmarking policy |
+| MCP control plane | Operator/admin layer | Managing models, aliases, profiles, presets, diagnostics, routing, benchmarks, memory policy | General completion traffic |
 
-### Local Developer Run
+### HTTP API Surface
 
-This is the simplest mode:
+| Endpoint | Status | Notes |
+| --- | --- | --- |
+| `GET /health` | Supported | Health and loaded runtime count |
+| `GET /v1/models` | Supported | Lists aliases, not raw base models |
+| `GET /v1/models/{model_id}` | Supported | Returns resolved alias information |
+| `POST /v1/chat/completions` | Supported | OpenAI-compatible chat |
+| `POST /v1/completions` | Supported | Legacy text completions only |
+| `POST /v1/embeddings` | Supported | Proxied to `llama-server` embeddings |
+| `POST /v1/responses` | Supported | Responses-style translation layer |
+| `POST /v1/messages` | Supported | Anthropic-compatible messages |
+| `POST /v1/messages/count_tokens` | Supported | Approximate token counting |
 
-1. set environment variables
-2. bootstrap catalog
-3. validate config
-4. start HTTP and MCP processes
+### Tool Use Support
 
-### Windows Service or Scheduled Startup
+| Endpoint | Tool use |
+| --- | --- |
+| `POST /v1/chat/completions` | Yes |
+| `POST /v1/responses` | Yes |
+| `POST /v1/messages` | Yes |
+| `POST /v1/completions` | No |
 
-Typical pattern:
+### MCP Tool Groups
 
-1. set environment variables in a startup script
-2. run `llama-mcp validate-config`
-3. start `llama-mcp http`
-4. optionally start `llama-mcp mcp`
+| Group | Representative tools |
+| --- | --- |
+| Catalog inspection | `llama_list_models`, `llama_get_model`, `llama_list_aliases`, `llama_get_alias` |
+| Catalog mutation | `llama_import_model`, `llama_download_model`, `llama_create_profile`, `llama_create_preset`, `llama_create_alias` |
+| Runtime operations | `llama_load_alias`, `llama_unload_alias`, `llama_unload_idle`, `llama_pin_alias`, `llama_get_runtime_status` |
+| Routing and diagnostics | `llama_get_hardware`, `llama_route_explain`, `llama_route_simulate`, `llama_list_route_events`, `llama_get_runtime_diagnostics` |
+| Benchmarking | `llama_run_benchmark`, `llama_record_benchmark`, `llama_verify_benchmark`, `llama_list_benchmarks`, `llama_benchmark_summary` |
+| Policy | `llama_get_memory_policy`, `llama_set_memory_policy` |
 
-### Linux Service Manager
+### Routing and Placement
 
-Typical pattern:
+The router scores candidates using:
 
-1. export environment variables in a systemd unit or wrapper script
-2. run `llama-mcp validate-config`
-3. launch `llama-mcp http`
+- current free system RAM
+- free dGPU VRAM
+- iGPU shared-memory policy
+- backend availability
+- backend preference
+- warm runtime reuse
+- stored benchmark evidence
+- experimental feature flags
 
-If you run MCP separately, launch `llama-mcp mcp` under a second unit or process supervisor.
+#### Placement Status
+
+| Placement | Typical backend | Status |
+| --- | --- | --- |
+| `cpu_only` | CPU | Stable |
+| `dgpu_only` | CUDA or Vulkan | Stable |
+| `cpu_dgpu_hybrid` | CUDA | Stable |
+| `igpu_only` | Vulkan or SYCL | Experimental |
+| `cpu_igpu_hybrid` | Vulkan or SYCL | Experimental |
+| `dgpu_igpu_mixed` | Vulkan | Experimental |
+
+> [!NOTE]
+> Experimental iGPU and mixed-GPU placements are disabled by default. Enable them explicitly with environment variables if you want the router to consider them.
+
+### Runtime Lifecycle
+
+| Behavior | What it means |
+| --- | --- |
+| Lazy load | A runtime is started only when an alias is first requested |
+| Warm reuse | Matching runtimes are reused instead of relaunched |
+| Idle unload | Non-pinned runtimes are unloaded after their idle timeout |
+| Pinning | Important runtimes can be kept resident |
+| Eviction | If the max loaded count is reached, the oldest non-pinned runtime is evicted first |
+
+### Config and State Files
+
+| File | Purpose |
+| --- | --- |
+| `catalog/catalog.yaml` | Human-edited catalog of models, profiles, presets, and aliases |
+| `state/mcp.db` | SQLite database for route history, benchmark data, and operational state |
+| [`SPEC.md`](SPEC.md) | More detailed product/design specification |
+
+### Catalog Concepts
+
+| Concept | Purpose | Typical fields |
+| --- | --- | --- |
+| Base model | Describes the actual GGUF artifact | `id`, `local_path`, `family`, `quantization`, `capabilities` |
+| Load profile | Controls launch and placement behavior | `context_size`, `threads`, `gpu_layers`, `backend_preference`, `idle_unload_seconds` |
+| Generation preset | Controls request defaults | `temperature`, `top_p`, `max_tokens`, `reasoning_mode` |
+| Alias | The client-facing model name | `id`, `base_model_id`, `load_profile_id`, `preset_id` |
+
+### Download Support
+
+The MCP control plane can also download models:
+
+- from a direct URL using `source: url` plus `metadata.url`
+- from Hugging Face using `source: hugging_face` plus `hf_repo` and `hf_filename`
+
+### Qwen Reasoning Notes
+
+The server includes special request shaping for Qwen-family models:
+
+- `reasoning_mode: off` can disable thinking behavior for Qwen/Qwen3.5 aliases
+- Qwen 3.5 aliases use explicit `enable_thinking` request fields when needed
+- older Qwen-family aliases may receive `/think` or `/no_think` system hints
+
+## Environment Variables
+
+### Core Server
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLAMA_MCP_HOST` | `127.0.0.1` | HTTP bind host |
+| `LLAMA_MCP_PORT` | `8080` | HTTP bind port |
+| `LLAMA_MCP_API_KEY` | unset | Optional API key; accepted as `Authorization: Bearer ...` or `x-api-key` |
+| `LLAMA_MCP_CATALOG_PATH` | `catalog/catalog.yaml` | Catalog file location |
+| `LLAMA_MCP_STATE_PATH` | `state/mcp.db` | SQLite state file location |
+
+### Runtime Behavior
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLAMA_MCP_IDLE_SCAN_SECONDS` | `30` | How often to scan for idle runtimes |
+| `LLAMA_MCP_RUNTIME_START_TIMEOUT` | `20` | Seconds to wait for a launched runtime to become healthy |
+| `LLAMA_MCP_HTTP_TIMEOUT` | `120` | Upstream proxy timeout in seconds |
+| `LLAMA_MCP_DEFAULT_IDLE_UNLOAD` | `900` | Default idle timeout for runtimes without a profile override |
+
+### Memory and Routing Policy
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLAMA_MCP_MIN_FREE_RAM` | `4 GiB` | Minimum free system RAM to keep after placement |
+| `LLAMA_MCP_MIN_FREE_DGPU_VRAM` | `1 GiB` | Minimum free dGPU VRAM reserve |
+| `LLAMA_MCP_MIN_FREE_IGPU_RAM` | `2 GiB` | Minimum shared RAM reserve for iGPU placements |
+| `LLAMA_MCP_MAX_LOADED` | `4` | Max simultaneously loaded runtimes |
+| `LLAMA_MCP_MAX_CONCURRENCY` | `4` | Max concurrent requests per runtime |
+| `LLAMA_MCP_ALLOW_EXPERIMENTAL_IGPU` | `false` | Enables experimental iGPU placements |
+| `LLAMA_MCP_ALLOW_EXPERIMENTAL_MIXED` | `false` | Enables experimental dGPU+iGPU mixed routing |
+
+### `llama.cpp` Executables
+
+| Variable | Purpose |
+| --- | --- |
+| `LLAMA_SERVER_CPU` | Path to CPU `llama-server` |
+| `LLAMA_SERVER_CUDA` | Path to CUDA `llama-server` |
+| `LLAMA_SERVER_VULKAN` | Path to Vulkan `llama-server` |
+| `LLAMA_SERVER_SYCL` | Path to SYCL `llama-server` |
+| `LLAMA_BENCH_CPU` | Path to CPU `llama-bench` |
+| `LLAMA_BENCH_CUDA` | Path to CUDA `llama-bench` |
+| `LLAMA_BENCH_VULKAN` | Path to Vulkan `llama-bench` |
+| `LLAMA_BENCH_SYCL` | Path to SYCL `llama-bench` |
 
 ## Validation and Testing
 
-Run the test suite:
-
-### Windows
-
-```powershell
-uv run pytest -q
-```
-
-### Linux
+### Validate config before startup
 
 ```bash
+uv run llama-mcp validate-config
+```
+
+### Run tests
+
+```bash
+# Install the optional test dependencies first if needed.
+uv sync --extra test
 uv run pytest -q
 ```
 
-The current project includes tests for:
+## Current Limitations
 
-- catalog validation
-- startup validation
-- routing decisions
-- runtime reuse and idle unload
-- benchmark parsing and verification
-- OpenAI compatibility translation
-- Anthropic compatibility translation
-- streaming event translation
-- MCP summary helpers
+- The project is still **alpha-stage**.
+- MCP is a control plane only; it is not a general inference endpoint.
+- `/v1/messages/count_tokens` is approximate.
+- Mixed dGPU+iGPU routing is experimental and only trusted when benchmark evidence is verified.
+- iGPU support is experimental.
+- Backend detection is strongest when backend-specific executables are configured explicitly.
+- The server supervises `llama.cpp`; it does not replace or reimplement upstream inference internals.
 
-## Operational Notes
+## Detailed Design Spec
 
-### Backend IDs
-
-The hardware inventory uses:
-
-- generic ids like `dgpu0`, `igpu0`
-- backend selectors like `cuda0`, `vulkan0`, `vulkan1`
-
-This makes the system more portable across machines and multi-GPU setups.
-
-### Qwen Reasoning Behavior
-
-The MCP server already contains model-family-specific handling for Qwen-family reasoning modes. It uses server-side reasoning controls when supported and falls back to request shaping where appropriate.
-
-### Experimental Paths
-
-Experimental routes are visible on purpose. They are not hidden, but they are marked as experimental and scored conservatively until benchmark evidence supports them.
-
-## Known Limitations
-
-- Mixed GPU execution remains experimental
-- some advanced multimodal block types are still normalized into placeholders
-- token counting for Anthropic compatibility is still approximate
-- not every `llama.cpp` backend combination is guaranteed to behave the same across vendors and drivers
-
-## Recommended First Steps for New Users
-
-1. install dependencies
-2. run `llama-mcp init-config`
-3. add one local model to the catalog
-4. run `llama-mcp validate-config`
-5. start the HTTP server
-6. confirm `GET /v1/models`
-7. send one OpenAI-style chat request
-8. send one Anthropic-style message request
-9. run `llama_get_hardware`
-10. run `llama_route_explain`
-
-## Project Status
-
-This project is already usable for local development and coding workflows, but it is still evolving. The architecture is intentionally designed to be robust enough for daily local use while leaving room for more compatibility polish and deeper backend validation over time.
-
+For the deeper product and architecture breakdown, see [SPEC.md](SPEC.md).
