@@ -1,4 +1,4 @@
-# Llama.cpp MCP Server
+# Llama.cpp MCP
 
 ![Hero banner](assets/hero.svg)
 
@@ -17,13 +17,13 @@ This project closes that gap by supervising local GGUF models and exposing them 
 
 ## About This Repo
 
-This repository is built to be practical first: a local MCP server that keeps model naming stable, routing explicit, and setup approachable for people who just want their local models to behave like a polished service.
+This repository is built to be practical first: a local MCP service that keeps model naming stable, routing explicit, and setup approachable for people who just want their local models to behave like a polished service.
 
 If you are new here, the rough mental model is:
 
 - one catalog file for models, profiles, presets, and aliases
 - one HTTP server for inference traffic
-- one MCP server for operating the system
+- one MCP service for operating the system
 - one local `llama.cpp` installation underneath it all
 
 ## Tech Stack
@@ -180,7 +180,7 @@ You can also point to custom paths explicitly with environment variables in step
 ```powershell
 # Clone the repository.
 git clone <YOUR_REPO_URL>
-cd llama.cpp-mcp-server
+cd llama-cpp-mcp
 
 # Install runtime dependencies.
 uv sync
@@ -319,7 +319,7 @@ $HOME/llama.cpp/build-sycl/bin/llama-bench
 ```bash
 # Clone the repository.
 git clone <YOUR_REPO_URL>
-cd llama.cpp-mcp-server
+cd llama-cpp-mcp
 
 # Install runtime dependencies.
 uv sync

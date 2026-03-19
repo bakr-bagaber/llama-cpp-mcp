@@ -36,7 +36,7 @@ def create_app(
         for runtime in list(runtime_manager.list_runtimes()):
             await runtime_manager.unload_runtime(runtime.runtime_key)
 
-    app = FastAPI(title="Llama MCP Server", lifespan=lifespan)
+    app = FastAPI(title="Llama MCP", lifespan=lifespan)
     app.state.settings = settings
     app.state.catalog = catalog
     app.state.hardware_probe = hardware_probe

@@ -1,5 +1,5 @@
 [project]
-name = "llama-ccp-mcp"
+name = "llama-cpp-mcp"
 version = "0.1.0"
 description = "Local llama.cpp MCP server with OpenAI and Anthropic compatibility layers"
 readme = "README.md"

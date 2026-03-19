@@ -1,5 +1,5 @@
 <svg width="1200" height="360" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Llama.cpp MCP Server</title>
+  <title id="title">Llama.cpp MCP</title>
   <desc id="desc">A dark, technical banner with layered cards and gradient accents.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
@@ -33,6 +33,6 @@
     <rect x="668" y="194" width="256" height="18" rx="9" fill="#9fb3cc" opacity="0.74"/>
     <rect x="668" y="224" width="194" height="18" rx="9" fill="#9fb3cc" opacity="0.56"/>
   </g>
-  <text x="96" y="320" fill="#f5f7fb" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="700">Llama.cpp MCP Server</text>
+  <text x="96" y="320" fill="#f5f7fb" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="700">Llama.cpp MCP</text>
   <text x="96" y="345" fill="#9fb3cc" font-family="Segoe UI, Arial, sans-serif" font-size="18">HTTP inference, MCP control, routing, benchmarks, and local model management</text>
 </svg>
