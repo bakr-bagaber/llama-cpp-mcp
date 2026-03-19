@@ -1,4 +1,4 @@
-﻿version = 1
+version = 1
 revision = 3
 requires-python = ">=3.12"
 
@@ -290,7 +290,7 @@ wheels = [
 ]
 
 [[package]]
-name = "llama-ccp-mcp"
+name = "llama-cpp-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -788,4 +788,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/e3/ad/4a96c425be6fb67e0
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0a/89/f8827ccff89c1586027a105e5630ff6139a64da2515e24dafe860bd9ae4d/uvicorn-0.42.0-py3-none-any.whl", hash = "sha256:96c30f5c7abe6f74ae8900a70e92b85ad6613b745d4879eb9b16ccad15645359", size = 68830, upload-time = "2026-03-16T06:19:48.325Z" },
 ]
-
