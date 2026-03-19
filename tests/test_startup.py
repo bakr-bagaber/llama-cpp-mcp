@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from llama_mcp.__main__ import build_auto_catalog, initialize_catalog, validate_startup_config
+from llama_mcp.__main__ import build_auto_catalog, initialize_catalog, initialize_catalog_auto, validate_startup_config
 from llama_mcp.catalog import CatalogStore
 from llama_mcp.models import AliasDefinition, BaseModelDefinition, GenerationPreset, LoadProfile
 from llama_mcp.settings import AppSettings
@@ -66,6 +66,24 @@ def test_build_auto_catalog_discovers_models_and_generates_aliases(sandbox_path:
     assert any(preset.id == "balanced-think-on" for preset in document.presets)
     assert any(alias.base_model_id == "qwen-coder-7b" for alias in document.aliases)
     assert any("coding" in alias.id for alias in document.aliases)
+
+
+def test_initialize_catalog_auto_overwrites_existing_template(sandbox_path: Path) -> None:
+    models_dir = sandbox_path / "models"
+    models_dir.mkdir()
+    model_path = models_dir / "demo.gguf"
+    model_path.write_bytes(b"0" * 1024)
+    catalog_path = sandbox_path / "catalog" / "catalog.yaml"
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text("models: []\nprofiles: []\npresets: []\naliases: []\n", encoding="utf-8")
+    settings = AppSettings(catalog_path=catalog_path, state_path=sandbox_path / "mcp.db", models_dir=models_dir)
+
+    initialize_catalog_auto(settings, catalog_path)
+
+    store = CatalogStore(catalog_path)
+    store.load()
+    assert any(model.id == "demo" for model in store.list_models())
+    assert any(alias.base_model_id == "demo" for alias in store.list_aliases())
 
 
 def test_appsettings_loads_dotenv_values(sandbox_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

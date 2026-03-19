@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 import re
@@ -42,8 +41,6 @@ def initialize_catalog(catalog_path: Path) -> Path:
 
 def initialize_catalog_auto(settings: AppSettings, catalog_path: Path) -> Path:
     """Build a starter catalog from models discovered in the models directory."""
-    if catalog_path.exists():
-        return catalog_path
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
     document = build_auto_catalog(settings)
     store = CatalogStore(catalog_path)
@@ -156,7 +153,7 @@ def default_presets() -> list[GenerationPreset]:
 
 def build_aliases(models: list[BaseModelDefinition], profiles: list[LoadProfile], presets: list[GenerationPreset]) -> list[AliasDefinition]:
     alias_specs = [
-        ("coding", {Capability.CHAT, Capability.COMPLETION, Capability.TOOLS}),
+        ("coding", {Capability.CHAT, Capability.COMPLETION}),
         ("art", {Capability.CHAT, Capability.COMPLETION}),
         ("chat", {Capability.CHAT, Capability.COMPLETION}),
         ("embed", {Capability.EMBEDDING}),

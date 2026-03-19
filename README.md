@@ -142,6 +142,7 @@ If you want the HTTP server to run in the background, start it with your shell's
 - Bash/Zsh: `nohup uv run llama-mcp http >/tmp/llama-mcp-http.log 2>&1 &`
 
 The MCP stdio server is intentionally foreground-oriented because the transport expects the host process to stay attached.
+The names like `llama_list_models` and `llama_route_explain` are MCP tool names, not shell commands. You invoke them from an MCP client or IDE integration, not by typing them directly into PowerShell.
 
 ## Windows Installation (PowerShell)
 
@@ -564,7 +565,7 @@ Good to know:
 
 ### 4. Use MCP to Import a Model and Create an Alias
 
-The standard MCP client call is a tool invocation with a tool name and a JSON arguments object. In other words, `llama_import_model(...)` is conceptually right, but the actual wire shape is JSON-RPC tool calling, not a Python function call.
+The standard MCP client call is a tool invocation with a tool name and a JSON arguments object. In other words, `llama_import_model(...)` is conceptually right for a human description, but the actual wire shape is JSON-RPC tool calling, not a Python function call.
 
 **Import a local model**
 
@@ -580,11 +581,7 @@ The standard MCP client call is a tool invocation with a tool name and a JSON ar
 }
 ```
 
-Call it with the MCP tool name:
-
-```text
-llama_import_model
-```
+Call it as a tool invocation from your MCP client, with the tool name `llama_import_model` and the JSON object above as the arguments payload.
 
 **Create an alias**
 
@@ -816,17 +813,106 @@ uv run pytest -q
 - Point it at `uv run llama-mcp mcp`.
 - Keep the workspace root on the repo so the catalog and `.env` file resolve correctly.
 
+Example server entry:
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "llama_api_key",
+      "description": "Llama MCP API Key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "llama-cpp-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "llama-mcp",
+        "mcp"
+      ],
+      "env": {
+        "LLAMA_MCP_API_KEY": "${input:llama_api_key}"
+      }
+    }
+  }
+}
+```
+
 ### Cursor
 
 - Add a local MCP server that launches `uv run llama-mcp mcp`.
 - Use the repo root as the working directory.
 - Keep the `.env` file in the root so the server finds your settings.
 
+Example server entry:
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "llama_api_key",
+      "description": "Llama MCP API Key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "llama-cpp-mcp": {
+      "command": "uv",
+      "args": [
+        "run",
+        "llama-mcp",
+        "mcp"
+      ],
+      "env": {
+        "LLAMA_MCP_API_KEY": "${input:llama_api_key}"
+      }
+    }
+  }
+}
+```
+
 ### Other MCP Clients
 
 - Start the MCP process with stdio transport.
 - Use the repo root as the working directory.
 - Make sure the client can read the server's stderr startup message if you want visible status.
+
+## Request Parameters
+
+### HTTP Requests
+
+| Endpoint | Required parameters | Optional parameters |
+| --- | --- | --- |
+| `POST /v1/chat/completions` | `model`, `messages` | `temperature`, `max_tokens`, `stream`, `tools`, `tool_choice`, `top_p`, `top_k` |
+| `POST /v1/responses` | `model`, `input` | `instructions`, `temperature`, `max_output_tokens`, `tools`, `tool_choice`, `stream` |
+| `POST /v1/messages` | `model`, `messages`, `anthropic-version` header | `system`, `max_tokens`, `temperature`, `top_p`, `tools`, `tool_choice`, `stream` |
+| `POST /v1/completions` | `model`, `prompt` | `max_tokens`, `temperature`, `stream` |
+| `GET /v1/models` | none | none |
+| `GET /v1/models/{model_id}` | `model_id` path parameter | none |
+
+### MCP Tool Arguments
+
+| Tool | Arguments |
+| --- | --- |
+| `llama_list_models` | none |
+| `llama_get_model` | `model_id` |
+| `llama_get_profile` | `profile_id` |
+| `llama_get_preset` | `preset_id` |
+| `llama_get_alias` | `alias_id` |
+| `llama_import_model` | full model object including `id`, `display_name`, and `local_path` |
+| `llama_create_profile` | full profile object |
+| `llama_create_preset` | full preset object |
+| `llama_create_alias` | `id`, `base_model_id`, `load_profile_id`, `preset_id` |
+| `llama_load_alias` | `alias_id` |
+| `llama_unload_alias` | `alias_id` |
+| `llama_pin_alias` | `alias_id`, optional `pinned` |
+| `llama_route_explain` | `alias_id` |
+| `llama_route_simulate` | `alias_id`, optional `model_ram_bytes`, optional `model_vram_bytes` |
+| `llama_record_benchmark` | `alias_id`, `backend`, `placement`, `prompt_tps`, `generation_tps`, optional memory fields |
 
 ## Current Limitations
 
