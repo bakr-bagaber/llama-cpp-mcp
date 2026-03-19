@@ -88,7 +88,7 @@ flowchart LR
 - [What You Need](#what-you-need)
 - [Commands You Will Use](#commands-you-will-use)
 - [Windows Installation](#windows-installation-powershell)
-- [Linux Installation](#linux-installation-bash)
+- [Unix Installation](#unix-installation-bash-and-zsh)
 - [Minimal Working Catalog](#minimal-working-catalog)
 - [Practical Use Cases](#practical-use-cases)
 - [Features and Specs](#features-and-specs)
@@ -123,7 +123,7 @@ The Python package is only one part of the setup. A working installation also ne
 
 | Command | What it does | When to use it |
 | --- | --- | --- |
-| `uv run llama-mcp init-config` | Writes a starter catalog file if one does not exist | First-time setup |
+| `uv run llama-mcp init-config` | Scans the models directory and writes an auto-generated starter catalog | First-time setup |
 | `uv run llama-mcp validate-config` | Validates catalog references and local model paths | Before starting servers |
 | `uv run llama-mcp http` | Starts the OpenAI/Anthropic-compatible HTTP server | For inference traffic |
 | `uv run llama-mcp mcp` | Starts the MCP server over stdio | For admin/control-plane tools |
@@ -133,6 +133,15 @@ If you install the package as a normal script-based app, these entry points also
 - `llama-mcp`
 - `llama-mcp-http`
 - `llama-mcp-server`
+
+### Background Mode
+
+If you want the HTTP server to run in the background, start it with your shell's native background tool instead of keeping the terminal attached.
+
+- PowerShell: `Start-Process uv -ArgumentList 'run','llama-mcp','http'`
+- Bash/Zsh: `nohup uv run llama-mcp http >/tmp/llama-mcp-http.log 2>&1 &`
+
+The MCP stdio server is intentionally foreground-oriented because the transport expects the host process to stay attached.
 
 ## Windows Installation (PowerShell)
 
@@ -161,13 +170,11 @@ This repo already auto-detects the following Windows paths when they exist:
 
 ```text
 C:\llama.cpp\cpu\llama-server.exe
-C:\llama.cpp\cuda13\llama-server.exe
 C:\llama.cpp\cuda\llama-server.exe
 C:\llama.cpp\vulkan\llama-server.exe
 C:\llama.cpp\sycl\llama-server.exe
 
 C:\llama.cpp\cpu\llama-bench.exe
-C:\llama.cpp\cuda13\llama-bench.exe
 C:\llama.cpp\cuda\llama-bench.exe
 C:\llama.cpp\vulkan\llama-bench.exe
 C:\llama.cpp\sycl\llama-bench.exe
@@ -179,7 +186,7 @@ You can also point to custom paths explicitly with environment variables in step
 
 ```powershell
 # Clone the repository.
-git clone <YOUR_REPO_URL>
+git clone https://github.com/bakr-bagaber/llama-cpp-mcp
 cd llama-cpp-mcp
 
 # Install runtime dependencies.
@@ -189,37 +196,31 @@ uv sync
 # uv sync --extra test
 ```
 
-### 4. Set environment variables
+### 4. Create a `.env` file
 
-Use this if your binaries are not in the default Windows locations, or if you want the setup to be explicit and easy to debug.
+Create a `.env` file in the repository root. The app reads it automatically on startup, so you do not need to export variables manually.
 
-```powershell
-# Optional but recommended: lock the server to localhost + a known port.
-$env:LLAMA_MCP_HOST = "127.0.0.1"
-$env:LLAMA_MCP_PORT = "8080"
+```dotenv
+LLAMA_MCP_HOST=127.0.0.1
+LLAMA_MCP_PORT=8080
+LLAMA_MCP_API_KEY=change-me
+LLAMA_MCP_CATALOG_PATH=./catalog/catalog.yaml
+LLAMA_MCP_STATE_PATH=./state/mcp.db
+LLAMA_MCP_MODELS_DIR=C:\llama.cpp\models
 
-# Optional: protect the HTTP API with a key.
-$env:LLAMA_MCP_API_KEY = "change-me"
+LLAMA_SERVER_CPU=C:\llama.cpp\cpu\llama-server.exe
+LLAMA_SERVER_CUDA=C:\llama.cpp\cuda\llama-server.exe
+LLAMA_SERVER_VULKAN=C:\llama.cpp\vulkan\llama-server.exe
+LLAMA_SERVER_SYCL=C:\llama.cpp\sycl\llama-server.exe
 
-# Point the MCP server to your catalog and state files.
-$env:LLAMA_MCP_CATALOG_PATH = "$PWD\catalog\catalog.yaml"
-$env:LLAMA_MCP_STATE_PATH = "$PWD\state\mcp.db"
-
-# Point to the llama.cpp binaries you actually have.
-$env:LLAMA_SERVER_CPU = "C:\llama.cpp\cpu\llama-server.exe"
-$env:LLAMA_SERVER_CUDA = "C:\llama.cpp\cuda13\llama-server.exe"
-$env:LLAMA_SERVER_VULKAN = "C:\llama.cpp\vulkan\llama-server.exe"
-$env:LLAMA_SERVER_SYCL = "C:\llama.cpp\sycl\llama-server.exe"
-
-# Optional benchmark binaries.
-$env:LLAMA_BENCH_CPU = "C:\llama.cpp\cpu\llama-bench.exe"
-$env:LLAMA_BENCH_CUDA = "C:\llama.cpp\cuda13\llama-bench.exe"
-$env:LLAMA_BENCH_VULKAN = "C:\llama.cpp\vulkan\llama-bench.exe"
-$env:LLAMA_BENCH_SYCL = "C:\llama.cpp\sycl\llama-bench.exe"
+LLAMA_BENCH_CPU=C:\llama.cpp\cpu\llama-bench.exe
+LLAMA_BENCH_CUDA=C:\llama.cpp\cuda\llama-bench.exe
+LLAMA_BENCH_VULKAN=C:\llama.cpp\vulkan\llama-bench.exe
+LLAMA_BENCH_SYCL=C:\llama.cpp\sycl\llama-bench.exe
 ```
 
 > [!NOTE]
-> The `$env:...` commands above only affect the current PowerShell session. If you want them to persist, add them to your user or system environment variables.
+> If you prefer shell exports or PowerShell session variables, those still work. `.env` is simply the recommended default for day-to-day setup.
 
 ### 5. Bootstrap the config
 
@@ -259,7 +260,7 @@ The default bind address is `127.0.0.1:8080`.
 uv run llama-mcp mcp
 ```
 
-This starts the MCP server over **stdio**, which is the transport most desktop MCP clients expect.
+This starts the MCP server over **stdio**, which is the transport most desktop MCP clients expect. The startup line is written to stderr so you can see that the process is alive.
 
 ### 10. Smoke test the HTTP surface
 
@@ -268,14 +269,15 @@ This starts the MCP server over **stdio**, which is the transport most desktop M
 Invoke-RestMethod -Uri "http://127.0.0.1:8080/health"
 
 # List the aliases that clients can use.
-Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -Headers @{
+$models = Invoke-RestMethod -Uri "http://127.0.0.1:8080/v1/models" -Headers @{
   "Authorization" = "Bearer change-me"
 }
+$models.data | Select-Object id, object, owned_by, experimental | Format-Table -AutoSize
 ```
 
 If you did not set `LLAMA_MCP_API_KEY`, remove the `Authorization` header.
 
-## Linux Installation (Bash)
+## Unix Installation (Bash and Zsh)
 
 ### 1. Install Python and `uv`
 
@@ -318,7 +320,7 @@ $HOME/llama.cpp/build-sycl/bin/llama-bench
 
 ```bash
 # Clone the repository.
-git clone <YOUR_REPO_URL>
+git clone https://github.com/bakr-bagaber/llama-cpp-mcp
 cd llama-cpp-mcp
 
 # Install runtime dependencies.
@@ -328,35 +330,30 @@ uv sync
 # uv sync --extra test
 ```
 
-### 4. Export environment variables
+### 4. Create a `.env` file
 
-```bash
-# Optional but recommended: explicit host/port.
-export LLAMA_MCP_HOST="127.0.0.1"
-export LLAMA_MCP_PORT="8080"
+```dotenv
+LLAMA_MCP_HOST=127.0.0.1
+LLAMA_MCP_PORT=8080
+LLAMA_MCP_API_KEY=change-me
+LLAMA_MCP_CATALOG_PATH=./catalog/catalog.yaml
+LLAMA_MCP_STATE_PATH=./state/mcp.db
+LLAMA_MCP_MODELS_DIR=./models
 
-# Optional: protect the HTTP API with a key.
-export LLAMA_MCP_API_KEY="change-me"
+LLAMA_SERVER_CPU=$HOME/llama.cpp/build-cpu/bin/llama-server
+LLAMA_SERVER_CUDA=$HOME/llama.cpp/build-cuda/bin/llama-server
+LLAMA_SERVER_VULKAN=$HOME/llama.cpp/build-vulkan/bin/llama-server
+LLAMA_SERVER_SYCL=$HOME/llama.cpp/build-sycl/bin/llama-server
+LLAMA_SERVER_METAL=$HOME/llama.cpp/build-metal/bin/llama-server
 
-# Explicit config paths.
-export LLAMA_MCP_CATALOG_PATH="$PWD/catalog/catalog.yaml"
-export LLAMA_MCP_STATE_PATH="$PWD/state/mcp.db"
-
-# Backend-specific llama.cpp executables.
-export LLAMA_SERVER_CPU="$HOME/llama.cpp/build-cpu/bin/llama-server"
-export LLAMA_SERVER_CUDA="$HOME/llama.cpp/build-cuda/bin/llama-server"
-export LLAMA_SERVER_VULKAN="$HOME/llama.cpp/build-vulkan/bin/llama-server"
-export LLAMA_SERVER_SYCL="$HOME/llama.cpp/build-sycl/bin/llama-server"
-
-# Optional benchmark executables.
-export LLAMA_BENCH_CPU="$HOME/llama.cpp/build-cpu/bin/llama-bench"
-export LLAMA_BENCH_CUDA="$HOME/llama.cpp/build-cuda/bin/llama-bench"
-export LLAMA_BENCH_VULKAN="$HOME/llama.cpp/build-vulkan/bin/llama-bench"
-export LLAMA_BENCH_SYCL="$HOME/llama.cpp/build-sycl/bin/llama-bench"
+LLAMA_BENCH_CPU=$HOME/llama.cpp/build-cpu/bin/llama-bench
+LLAMA_BENCH_CUDA=$HOME/llama.cpp/build-cuda/bin/llama-bench
+LLAMA_BENCH_VULKAN=$HOME/llama.cpp/build-vulkan/bin/llama-bench
+LLAMA_BENCH_SYCL=$HOME/llama.cpp/build-sycl/bin/llama-bench
 ```
 
 > [!TIP]
-> On Linux, the HTTP server can still fall back to `llama-server` from `PATH` for runtime launch, but explicit `LLAMA_SERVER_*` variables make backend detection, routing, and troubleshooting much clearer.
+> macOS can use the same `.env` layout as Linux. If the only difference is the backend executable path, keep the same instructions and adjust the paths in `.env`.
 
 ### 5. Bootstrap the config
 
@@ -470,21 +467,25 @@ These examples are intentionally commented so a new user can understand what is 
 
 ### 1. OpenAI-Compatible Chat Completion
 
-```bash
+```powershell
 # Ask the local model a question through the OpenAI-compatible surface.
 # The model name must be an alias from catalog/catalog.yaml.
-curl \
-  -X POST http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer change-me" \
-  -d '{
-    "model": "qwen3.5-0.8b/precise-auto",
-    "messages": [
-      {"role": "system", "content": "You are a concise coding assistant."},
-      {"role": "user", "content": "Explain what lazy loading means in one paragraph."}
-    ]
-  }'
+$body = @{
+  model = "qwen3.5-0.8b/precise-auto"
+  messages = @(
+    @{ role = "system"; content = "You are a concise coding assistant." }
+    @{ role = "user"; content = "Explain what lazy loading means in one paragraph." }
+  )
+} | ConvertTo-Json -Depth 20
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8080/v1/chat/completions" `
+  -Headers @{ Authorization = "Bearer change-me" } `
+  -ContentType "application/json" `
+  -Body $body
 ```
+
+If you want a one-liner in PowerShell, use `curl.exe`, not `curl`, because `curl` is an alias for `Invoke-WebRequest`.
 
 What happens behind the scenes:
 
@@ -563,7 +564,7 @@ Good to know:
 
 ### 4. Use MCP to Import a Model and Create an Alias
 
-The exact JSON-RPC envelope depends on your MCP client, but these are the tool names and arguments you will call.
+The standard MCP client call is a tool invocation with a tool name and a JSON arguments object. In other words, `llama_import_model(...)` is conceptually right, but the actual wire shape is JSON-RPC tool calling, not a Python function call.
 
 **Import a local model**
 
@@ -753,6 +754,7 @@ The server includes special request shaping for Qwen-family models:
 | `LLAMA_MCP_API_KEY` | unset | Optional API key; accepted as `Authorization: Bearer ...` or `x-api-key` |
 | `LLAMA_MCP_CATALOG_PATH` | `catalog/catalog.yaml` | Catalog file location |
 | `LLAMA_MCP_STATE_PATH` | `state/mcp.db` | SQLite state file location |
+| `LLAMA_MCP_MODELS_DIR` | `C:\llama.cpp\models` | Directory scanned by `init-config` for local `.gguf` files |
 
 ### Runtime Behavior
 
@@ -783,10 +785,12 @@ The server includes special request shaping for Qwen-family models:
 | `LLAMA_SERVER_CUDA` | Path to CUDA `llama-server` |
 | `LLAMA_SERVER_VULKAN` | Path to Vulkan `llama-server` |
 | `LLAMA_SERVER_SYCL` | Path to SYCL `llama-server` |
+| `LLAMA_SERVER_METAL` | Path to Metal `llama-server` on Apple Silicon |
 | `LLAMA_BENCH_CPU` | Path to CPU `llama-bench` |
 | `LLAMA_BENCH_CUDA` | Path to CUDA `llama-bench` |
 | `LLAMA_BENCH_VULKAN` | Path to Vulkan `llama-bench` |
 | `LLAMA_BENCH_SYCL` | Path to SYCL `llama-bench` |
+| `LLAMA_BENCH_METAL` | Path to Metal `llama-bench` on Apple Silicon |
 
 ## Validation and Testing
 
@@ -803,6 +807,26 @@ uv run llama-mcp validate-config
 uv sync --extra test
 uv run pytest -q
 ```
+
+## IDE Setup
+
+### VS Code
+
+- Use the MCP extension or your AI assistant extension's MCP support.
+- Point it at `uv run llama-mcp mcp`.
+- Keep the workspace root on the repo so the catalog and `.env` file resolve correctly.
+
+### Cursor
+
+- Add a local MCP server that launches `uv run llama-mcp mcp`.
+- Use the repo root as the working directory.
+- Keep the `.env` file in the root so the server finds your settings.
+
+### Other MCP Clients
+
+- Start the MCP process with stdio transport.
+- Use the repo root as the working directory.
+- Make sure the client can read the server's stderr startup message if you want visible status.
 
 ## Current Limitations
 

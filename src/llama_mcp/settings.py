@@ -16,6 +16,7 @@ class AppSettings(StrictModel):
     api_key: str | None = None
     catalog_path: Path = Path("catalog/catalog.yaml")
     state_path: Path = Path("state/mcp.db")
+    models_dir: Path = Path(r"C:\llama.cpp\models")
     idle_scan_interval_seconds: int = Field(default=30, ge=1)
     runtime_start_timeout_seconds: int = Field(default=20, ge=1)
     http_timeout_seconds: float = Field(default=120.0, gt=0)
@@ -32,34 +33,57 @@ class AppSettings(StrictModel):
 
     @classmethod
     def load(cls) -> "AppSettings":
+        dotenv = cls._load_dotenv()
         return cls(
-            host=os.getenv("LLAMA_MCP_HOST", "127.0.0.1"),
-            port=int(os.getenv("LLAMA_MCP_PORT", "8080")),
-            api_key=os.getenv("LLAMA_MCP_API_KEY") or None,
-            catalog_path=Path(os.getenv("LLAMA_MCP_CATALOG_PATH", "catalog/catalog.yaml")),
-            state_path=Path(os.getenv("LLAMA_MCP_STATE_PATH", "state/mcp.db")),
-            idle_scan_interval_seconds=int(os.getenv("LLAMA_MCP_IDLE_SCAN_SECONDS", "30")),
-            runtime_start_timeout_seconds=int(os.getenv("LLAMA_MCP_RUNTIME_START_TIMEOUT", "20")),
-            http_timeout_seconds=float(os.getenv("LLAMA_MCP_HTTP_TIMEOUT", "120")),
-            default_idle_unload_seconds=int(os.getenv("LLAMA_MCP_DEFAULT_IDLE_UNLOAD", "900")),
-            cpu_executable=os.getenv("LLAMA_SERVER_CPU") or None,
-            cuda_executable=os.getenv("LLAMA_SERVER_CUDA") or None,
-            vulkan_executable=os.getenv("LLAMA_SERVER_VULKAN") or None,
-            sycl_executable=os.getenv("LLAMA_SERVER_SYCL") or None,
-            cpu_bench_executable=os.getenv("LLAMA_BENCH_CPU") or None,
-            cuda_bench_executable=os.getenv("LLAMA_BENCH_CUDA") or None,
-            vulkan_bench_executable=os.getenv("LLAMA_BENCH_VULKAN") or None,
-            sycl_bench_executable=os.getenv("LLAMA_BENCH_SYCL") or None,
+            host=cls._env("LLAMA_MCP_HOST", dotenv, "127.0.0.1"),
+            port=int(cls._env("LLAMA_MCP_PORT", dotenv, "8080")),
+            api_key=cls._env("LLAMA_MCP_API_KEY", dotenv) or None,
+            catalog_path=Path(cls._env("LLAMA_MCP_CATALOG_PATH", dotenv, "catalog/catalog.yaml")),
+            state_path=Path(cls._env("LLAMA_MCP_STATE_PATH", dotenv, "state/mcp.db")),
+            models_dir=Path(cls._env("LLAMA_MCP_MODELS_DIR", dotenv, r"C:\llama.cpp\models")),
+            idle_scan_interval_seconds=int(cls._env("LLAMA_MCP_IDLE_SCAN_SECONDS", dotenv, "30")),
+            runtime_start_timeout_seconds=int(cls._env("LLAMA_MCP_RUNTIME_START_TIMEOUT", dotenv, "20")),
+            http_timeout_seconds=float(cls._env("LLAMA_MCP_HTTP_TIMEOUT", dotenv, "120")),
+            default_idle_unload_seconds=int(cls._env("LLAMA_MCP_DEFAULT_IDLE_UNLOAD", dotenv, "900")),
+            cpu_executable=cls._env("LLAMA_SERVER_CPU", dotenv) or None,
+            cuda_executable=cls._env("LLAMA_SERVER_CUDA", dotenv) or None,
+            vulkan_executable=cls._env("LLAMA_SERVER_VULKAN", dotenv) or None,
+            sycl_executable=cls._env("LLAMA_SERVER_SYCL", dotenv) or None,
+            cpu_bench_executable=cls._env("LLAMA_BENCH_CPU", dotenv) or None,
+            cuda_bench_executable=cls._env("LLAMA_BENCH_CUDA", dotenv) or None,
+            vulkan_bench_executable=cls._env("LLAMA_BENCH_VULKAN", dotenv) or None,
+            sycl_bench_executable=cls._env("LLAMA_BENCH_SYCL", dotenv) or None,
             policy=MemoryPolicy(
-                min_free_system_ram_bytes=int(os.getenv("LLAMA_MCP_MIN_FREE_RAM", str(4 * 1024**3))),
-                min_free_dgpu_vram_bytes=int(os.getenv("LLAMA_MCP_MIN_FREE_DGPU_VRAM", str(1 * 1024**3))),
-                min_free_igpu_shared_ram_bytes=int(os.getenv("LLAMA_MCP_MIN_FREE_IGPU_RAM", str(2 * 1024**3))),
-                max_loaded_instances=int(os.getenv("LLAMA_MCP_MAX_LOADED", "4")),
-                max_concurrent_requests_per_runtime=int(os.getenv("LLAMA_MCP_MAX_CONCURRENCY", "4")),
-                allow_experimental_igpu=os.getenv("LLAMA_MCP_ALLOW_EXPERIMENTAL_IGPU", "").lower() in {"1", "true", "yes"},
-                allow_experimental_mixed_gpu=os.getenv("LLAMA_MCP_ALLOW_EXPERIMENTAL_MIXED", "").lower() in {"1", "true", "yes"},
+                min_free_system_ram_bytes=int(cls._env("LLAMA_MCP_MIN_FREE_RAM", dotenv, str(4 * 1024**3))),
+                min_free_dgpu_vram_bytes=int(cls._env("LLAMA_MCP_MIN_FREE_DGPU_VRAM", dotenv, str(1 * 1024**3))),
+                min_free_igpu_shared_ram_bytes=int(cls._env("LLAMA_MCP_MIN_FREE_IGPU_RAM", dotenv, str(2 * 1024**3))),
+                max_loaded_instances=int(cls._env("LLAMA_MCP_MAX_LOADED", dotenv, "4")),
+                max_concurrent_requests_per_runtime=int(cls._env("LLAMA_MCP_MAX_CONCURRENCY", dotenv, "4")),
+                allow_experimental_igpu=cls._env("LLAMA_MCP_ALLOW_EXPERIMENTAL_IGPU", dotenv, "").lower() in {"1", "true", "yes"},
+                allow_experimental_mixed_gpu=cls._env("LLAMA_MCP_ALLOW_EXPERIMENTAL_MIXED", dotenv, "").lower() in {"1", "true", "yes"},
             ),
         )
+
+    @staticmethod
+    def _load_dotenv(path: Path | None = None) -> dict[str, str]:
+        dotenv_path = path or Path(".env")
+        if not dotenv_path.exists():
+            return {}
+        values: dict[str, str] = {}
+        for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                values[key] = value
+        return values
+
+    @staticmethod
+    def _env(name: str, dotenv: dict[str, str], default: str | None = None) -> str:
+        return os.getenv(name) or dotenv.get(name) or (default if default is not None else "")
 
     def ensure_directories(self) -> None:
         self.catalog_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +108,7 @@ class AppSettings(StrictModel):
 
         defaults = {
             Backend.CPU: [Path(r"C:\llama.cpp\cpu\llama-server.exe")],
-            Backend.CUDA: [Path(r"C:\llama.cpp\cuda13\llama-server.exe"), Path(r"C:\llama.cpp\cuda\llama-server.exe")],
+            Backend.CUDA: [Path(r"C:\llama.cpp\cuda\llama-server.exe")],
             Backend.VULKAN: [Path(r"C:\llama.cpp\vulkan\llama-server.exe")],
             Backend.SYCL: [Path(r"C:\llama.cpp\sycl\llama-server.exe")],
         }
@@ -106,7 +130,7 @@ class AppSettings(StrictModel):
 
         defaults = {
             Backend.CPU: [Path(r"C:\llama.cpp\cpu\llama-bench.exe")],
-            Backend.CUDA: [Path(r"C:\llama.cpp\cuda13\llama-bench.exe"), Path(r"C:\llama.cpp\cuda\llama-bench.exe")],
+            Backend.CUDA: [Path(r"C:\llama.cpp\cuda\llama-bench.exe")],
             Backend.VULKAN: [Path(r"C:\llama.cpp\vulkan\llama-bench.exe")],
             Backend.SYCL: [Path(r"C:\llama.cpp\sycl\llama-bench.exe")],
         }
